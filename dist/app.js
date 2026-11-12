@@ -190,9 +190,100 @@ function performance(){
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
       competitionPerformance(false)+competitionPerformance(true)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
 }
+const historyStatus = { hit: 'Acertou', miss: 'Errou' };
+const recentFirst = (a, b) => b.day.localeCompare(a.day) || a.home.localeCompare(b.home, 'pt');
+const historySort = {
+  newest: recentFirst,
+  oldest: (a, b) => recentFirst(b, a),
+  highest: (a, b) => b.prob - a.prob || recentFirst(a, b),
+  lowest: (a, b) => a.prob - b.prob || recentFirst(a, b),
+  hits: (a, b) => a.status.localeCompare(b.status) || recentFirst(a, b),
+  misses: (a, b) => b.status.localeCompare(a.status) || recentFirst(a, b),
+};
+const historyOptions = entries => entries.map(([value, label]) =>
+  '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('');
+
+function renderHistory(content, history) {
+  const completed = history.picks.filter(pick =>
+    Object.hasOwn(historyStatus, pick.status) &&
+    Array.isArray(pick.score) && pick.score.length === 2 &&
+    pick.score.every(goals => Number.isInteger(goals) && goals >= 0));
+  const leagues = [...new Map(completed.map(pick => [pick.league, pick.leagueName]))]
+    .sort((a, b) => a[1].localeCompare(b[1], 'pt'));
+  content.innerHTML =
+    '<div class="history-controls" role="group" aria-label="Filtros e ordenação do histórico">' +
+    '<label>Liga<select data-history-league>' + historyOptions([['', 'Todas as ligas'], ...leagues]) + '</select></label>' +
+    '<label>Equipa<select data-history-team></select></label>' +
+    '<label>Ordenar por<select data-history-sort>' + historyOptions([
+      ['newest', 'Data · mais recentes'], ['oldest', 'Data · mais antigos'],
+      ['highest', 'Probabilidade · maior primeiro'], ['lowest', 'Probabilidade · menor primeiro'],
+      ['hits', 'Estado · acertos primeiro'], ['misses', 'Estado · erros primeiro'],
+    ]) + '</select></label></div>' +
+    (history.updated ? '<p class="history-updated">Última atualização · ' + esc(new Intl.DateTimeFormat('pt-PT', {
+      dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Lisbon'
+    }).format(new Date(history.updated))) + ' (Lisboa)</p>' : '') +
+    '<div data-history-results></div>';
+
+  const league = content.querySelector('[data-history-league]');
+  const team = content.querySelector('[data-history-team]');
+  const order = content.querySelector('[data-history-sort]');
+  const results = content.querySelector('[data-history-results]');
+
+  function updateTeams() {
+    const selected = team.value;
+    const teams = [...new Set(completed
+      .filter(pick => !league.value || pick.league === league.value)
+      .flatMap(pick => [pick.home, pick.away]))].sort((a, b) => a.localeCompare(b, 'pt'));
+    team.innerHTML = historyOptions([['', 'Todas as equipas'], ...teams.map(name => [name, name])]);
+    team.value = teams.includes(selected) ? selected : '';
+  }
+
+  function updateResults() {
+    const picks = completed.filter(pick =>
+      (!league.value || pick.league === league.value) &&
+      (!team.value || pick.home === team.value || pick.away === team.value))
+      .sort(historySort[order.value] ?? recentFirst);
+    const hits = picks.filter(pick => pick.status === 'hit').length;
+    const matches = picks.length ? table(['Data', 'Jogo', 'Liga', 'Palpite', 'Probabilidade', 'Resultado', 'Estado'],
+      picks.map(pick => {
+        const values = [new Intl.DateTimeFormat('pt-PT', { dateStyle: 'short', timeZone: 'UTC' }).format(new Date(pick.day + 'T12:00Z')),
+          pick.home + ' – ' + pick.away, pick.leagueName, pick.market, pct(pick.prob), pick.score.join('–')];
+        return '<tr>' + values.map(value => '<td>' + esc(value) + '</td>').join('') +
+          '<td><span class="history-status history-' + pick.status + '">' + historyStatus[pick.status] + '</span></td></tr>';
+      }).join('')) : '<p class="empty">' + (completed.length
+        ? 'Nenhum jogo concluído corresponde aos filtros.'
+        : 'Os jogos das Top Picks aparecem aqui assim que houver um resultado final confirmado.') + '</p>';
+    results.innerHTML = '<div class="stats">' + tile('Taxa de acerto', picks.length ? pct(hits / picks.length) : '—') +
+      tile('Jogos concluídos', picks.length) + tile('Acertos', hits) + tile('Erros', picks.length - hits) + '</div>' + matches;
+  }
+
+  league.addEventListener('change', () => { updateTeams(); updateResults(); });
+  team.addEventListener('change', updateResults);
+  order.addEventListener('change', updateResults);
+  updateTeams();
+  updateResults();
+}
+
+let historyRequest;
+async function historyPage() {
+  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados para jogos concluídos, avaliados pelo resultado aos 90 minutos.');
+  const content = document.createElement('div');
+  content.textContent = 'A carregar o histórico…';
+  main.append(content);
+  try {
+    historyRequest ??= fetch('history.json', { cache: 'no-cache' }).then(response => {
+      if (!response.ok) throw Error('History unavailable');
+      return response.json();
+    }).catch(error => { historyRequest = null; throw error; });
+    renderHistory(content, await historyRequest);
+  } catch {
+    content.textContent = 'Não foi possível carregar o histórico. Atualiza a página para tentar novamente.';
+  }
+}
+
 function route(){
-  const page=['#leagues','#performance'].includes(location.hash)?location.hash:'#predictions';
+  const page=['#leagues','#performance','#historico'].includes(location.hash)?location.hash:'#predictions';
   document.querySelectorAll('nav a').forEach(a=>a.getAttribute('href')===page?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current'));
-  ({'#predictions':predictions,'#leagues':leagues,'#performance':performance})[page]();
+  ({'#predictions':predictions,'#leagues':leagues,'#performance':performance,'#historico':historyPage})[page]();
 }
 fetch('snapshot.json').then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;document.querySelector('#freshness').textContent='Snapshot '+data.day;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
