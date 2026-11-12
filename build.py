@@ -202,6 +202,30 @@ def measure(p,y):
                 doubleBrier=np.round(((q-hits)**2).mean(axis=0),4).tolist(),
                 hit=np.round(hits.mean(axis=0),4).tolist(),selected=round(float(hits[i,best].mean()),4))
 
+def competition_backtest(records):
+    """Pool pre-month training games, then score each league's held-out matches."""
+    months=defaultdict(list)
+    for record in records:
+        months[record[0][:7]].append(record)
+    past=[]
+    predictions=defaultdict(list)
+    for games in months.values():
+        if len(past)>=500:
+            calibration_start=(date.fromisoformat(games[0][0])-timedelta(days=60)).isoformat()
+            training=[r for r in past if r[0]<calibration_start]
+            calibration=[r for r in past if r[0]>=calibration_start]
+            if len(training)>=300 and len(calibration)>=100:
+                x,y=zip(*[(r[2],r[3]) for r in training])
+                xc,yc=zip(*[(r[2],r[3]) for r in calibration])
+                model=LogisticRegression(max_iter=1200).fit(x,y)
+                temperature=minimize_scalar(lambda t:log_loss(yc,predict(model,xc,t),labels=[0,1,2]),
+                                            bounds=(.4,4),method='bounded').x
+                for record,prob in zip(games,predict(model,[r[2] for r in games],temperature)):
+                    predictions[record[1]].append((prob,record[3]))
+        past.extend(games)
+    return {code:measure(np.array([p for p,y in rows]),np.array([y for p,y in rows]))
+            for code,rows in predictions.items()}
+
 def build():
     leagues=read_data()
     final_scores={m['id']:m['score'] for l in leagues for season in l['seasons'].values()
@@ -254,8 +278,8 @@ def build():
         scores=q.max(axis=1)
         hit=np.where(best==0,ye!=2,ye!=0)
         bands=[]
-        for lo,hi in zip([0,.6,.7,.75,.8,.85,.9,.95],[.6,.7,.75,.8,.85,.9,.95,1.01]):
-            mask=(scores>=lo)&(scores<hi)
+        for lo,hi in zip([.75,.8,.85,.9,.95],[.8,.85,.9,.95,1.01]):
+            mask=(scores>.75)&(scores>=lo)&(scores<hi)
             if mask.any():
                 bands.append(dict(lo=lo,hi=min(hi,1),n=int(mask.sum()),expected=float(scores[mask].mean()),observed=float(hit[mask].mean())))
         qualifying=scores>PICK_MINIMUM
@@ -263,10 +287,7 @@ def build():
         shown_days={r[0] for r,shown in zip(test,qualifying) if shown}
         displayed=dict(n=int(qualifying.sum()),hit=float(hit[qualifying].mean()) if qualifying.any() else None,
                        days=len(shown_days),matchDays=len(match_days))
-        by_league={}
-        for code in sorted({r[1] for r in test}):
-            mask=np.array([r[1]==code for r in test])
-            by_league[code]=measure(p[mask],ye[mask])
+        by_league=competition_backtest(records)
         evaluation=dict(name=name,train=len(chosen_train),trainingStart=chosen_train[0][0],historyStart=records[0][0],historyMatches=len(records),validation=len(val),start=test[0][0],end=test[-1][0],
                         **measure(p,ye),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,
                         models=[dict(name=n,train=len(w),trainStart=w[0][0],**measure(predict(m,xe,t),ye)) for _,n,m,t,w in candidates])

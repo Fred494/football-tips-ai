@@ -129,11 +129,12 @@ function leagueHit(code){
 }
 function rateLabel(rate){
  if(typeof rate!=='number') return '<span class="muted">Unavailable</span>';
+ if(rate>.8) return '<span class="star-rate" title="Above 80% historical hit rate">★ '+pct(rate)+'</span>';
  return rate<.7?'<span class="danger-rate">⚠ '+pct(rate)+' · Below 70%</span>':'<span class="good-rate">'+pct(rate)+'</span>';
 }
 function leaguePerformanceBox(m){
  const l=getLeague(m.league), e=leagueHit(l.code);
- return '<section class="box full"><h3>Performance by league</h3><div class="table-scroll"><table><thead><tr><th>League</th><th>Matches</th><th>Selected hit rate</th></tr></thead><tbody><tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr></tbody></table></div><p>Historical results on held-out matches. This is separate from the probability for this match.</p></section>';
+ return '<section class="box full"><h3>Performance by league</h3><div class="table-scroll"><table><thead><tr><th>League</th><th>Matches</th><th>Selected hit rate</th></tr></thead><tbody><tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr></tbody></table></div><p>Historical backtest results. Club competitions use monthly test windows. This is separate from the probability for this match.</p></section>';
 }
 function standingsTable(rows,limit,international){
  return table(['#','Team','P','W','D','L','DIFF','GLS','Last 5','PTS'],rows.slice(0,limit).map((r,i)=>
@@ -166,6 +167,17 @@ function leagues(){
  main.querySelectorAll('[data-code]').forEach(el=>el.onchange=()=>{if(el.checked)disabled.delete(el.dataset.code);else disabled.add(el.dataset.code);localStorage.setItem('edge-disabled',JSON.stringify([...disabled]));});
  bindImageFallback(main);
 }
+function competitionPerformance(national){
+ const competitions=data.leagues.filter(l=>Boolean(l.international)===national)
+   .sort((a,b)=>(leagueHit(b.code)?.selected??-1)-(leagueHit(a.code)?.selected??-1)||a.name.localeCompare(b.name));
+ const rows=competitions.map(l=>{
+   const e=leagueHit(l.code);
+   return '<tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr>';
+ }).join('');
+ return '<section class="box full"><h3>'+ (national?'National competitions':'Club competitions')+'</h3>'+
+   table(['Competition','Test matches','Historical hit rate'],rows)+
+   '<p>'+(national?'A rate appears where verified regulation-time scores were available for testing.':'Ranked by historical hit rate in monthly tests using only earlier matches. Small samples can produce unusually high or low rates.')+'</p></section>';
+}
 function performance(){
   const e=data.evaluation;
   const intl=data.internationalEvaluation;
@@ -173,10 +185,10 @@ function performance(){
     (!e?'<p class="notice">Insufficient verified results to evaluate a model.</p>':
       '<p>'+esc(e.name)+' · Test window '+esc(e.start)+' to '+esc(e.end)+' · '+e.train+' training matches since '+esc(e.trainingStart)+' · '+e.validation+' calibration matches</p>'+
       '<div class="stats">'+tile('Test matches',e.n)+tile('Selected outcome hit rate',pct(e.selected))+tile('1X hit rate',pct(e.hit[0]))+tile('X2 hit rate',pct(e.hit[1]))+tile('Multiclass log loss',e.logLoss)+tile('Multiclass Brier',e.brier)+'</div>'+
-      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
+      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.filter(b=>b.lo>=.75).map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
       '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
-      '<section class="box full"><h3>Performance by league</h3>'+table(['League','Matches','Selected hit rate','Log loss'],Object.entries(e.leagues).map(([k,v])=>'<tr><td>'+esc(getLeague(k).name)+'</td><td>'+esc(v.n)+'</td><td>'+rateLabel(v.selected)+'</td><td>'+esc(v.logLoss)+'</td></tr>').join(''))+'</section></div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
+      competitionPerformance(false)+competitionPerformance(true)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
 }
 function route(){
   const page=['#leagues','#performance'].includes(location.hash)?location.hash:'#predictions';
