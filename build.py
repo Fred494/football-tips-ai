@@ -13,6 +13,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from results_feed import merge
+from history import load_history, save_history, update_history
 from international_model import predict_internationals
 from player_data import PLAYER_FEATURES, for_match, load_players
 
@@ -328,18 +329,21 @@ def build():
     extra_crests=ROOT/'standings_crests.json'
     if extra_crests.exists():
         snapshot['crests'].update(json.loads(extra_crests.read_text()))
+    international_file = ROOT/'data'/'international-fixtures.json'
+    if international_file.exists():
+        for match in json.loads(international_file.read_text())['rows']:
+            if match['score'] is not None and match['day'] <= TODAY.isoformat():
+                match_id = f"int.unl|2026-27|{match['day']}|{match['home']}|{match['away']}"
+                final_scores[match_id] = match['score']
+
+    history_path = ROOT/'dist'/'history.json'
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:
-        db.execute('CREATE TABLE IF NOT EXISTS snapshots (created TEXT PRIMARY KEY, payload TEXT NOT NULL)')
-        db.execute('''CREATE TABLE IF NOT EXISTS settlements (
-                   created TEXT, match_id TEXT, correct INTEGER, PRIMARY KEY (created, match_id))''')
-        for created,payload in db.execute('SELECT created,payload FROM snapshots'):
-            for forecast in json.loads(payload)['matches']:
-                score=final_scores.get(forecast['id'])
-                if score is not None and 'market' in forecast:
-                    correct=score[0]>=score[1] if forecast['market']=='1X' else score[1]>=score[0]
-                    db.execute('INSERT OR IGNORE INTO settlements VALUES (?,?,?)',
-                               (created,forecast['id'],int(correct)))
-        db.execute('INSERT OR IGNORE INTO snapshots VALUES (?,?)',(timestamp,json.dumps(snapshot)))
+        db.execute('CREATE TABLE IF NOT EXISTS published_history (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
+        cached = db.execute('SELECT payload FROM published_history WHERE id = 1').fetchone()
+        history = json.loads(cached[0]) if cached else load_history(history_path)
+        history = update_history(history, snapshot, final_scores)
+        db.execute('INSERT OR REPLACE INTO published_history VALUES (1, ?)', (json.dumps(history),))
+    save_history(history_path, history)
     target=ROOT/'dist'/'snapshot.json'
     temp_path=target.with_suffix('.tmp')
     temp_path.write_text(json.dumps(snapshot,ensure_ascii=False,allow_nan=False))
