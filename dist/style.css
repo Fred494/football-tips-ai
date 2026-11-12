@@ -10,3 +10,12 @@
 .league-card{align-self:start}.league-heading,.team-cell{display:flex;align-items:center;gap:9px}.league-heading h3{margin:2px 0 0}.league-badge{width:42px;height:42px;flex-basis:42px}.flag-badge img{object-fit:contain}.league-card caption{text-align:left;color:var(--muted);padding:7px 0;font-size:12px}.league-details{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}.league-details summary{cursor:pointer;font-weight:700;color:var(--accent);padding:5px 0}.league-details[open]{grid-column:auto}.coverage:has(.league-details[open]){align-items:start}.league-card:has(.league-details[open]){grid-column:1/-1}.form-row{display:inline-flex;gap:3px;white-space:nowrap}.form-chip{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:750;color:#fff}.form-W{background:#087c51}.form-D{background:#617483}.form-L{background:#b93535}.danger-rate,.good-rate{display:inline-block;padding:3px 7px;border-radius:5px;font-size:12px;font-weight:750;white-space:nowrap}.danger-rate{background:#fde9e9;color:#a32424}.good-rate{background:#e1f4e9;color:#075c4b}.league-rate{font-size:13px}
 
 .star-rate{display:inline-block;padding:3px 7px;border-radius:5px;font-size:12px;font-weight:750;white-space:nowrap;background:#e4efff;color:#134eaa}
+
+.history-status { display: inline-block; padding: .2rem .55rem; border-radius: .35rem; font-weight: 700; white-space: nowrap; }
+.history-hit { background: #123b2d; color: #a0f3c6; }
+.history-miss { background: #492329; color: #ffc3ca; }
+nav { flex-wrap: wrap; }
+.history-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 195px), 1fr)); gap: 12px; margin-top: 20px; }
+.history-controls label { display: grid; gap: 5px; min-width: 0; }
+.history-controls select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); }
+.history-updated { font-size: 13px; margin-top: 12px; }
