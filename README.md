@@ -1,0 +1,1 @@
+# football-tips-ai
