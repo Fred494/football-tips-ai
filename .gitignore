@@ -1,0 +1,6 @@
+__pycache__/
+data/*.sqlite
+data/*.sqlite-*
+data/fetch-status.json
+dist/*.tmp
+data/player_snapshots.json

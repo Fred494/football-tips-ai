@@ -1,0 +1,39 @@
+name: Daily football forecasts
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+      timezone: Europe/Lisbon
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: football-edge-pages
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: data/forecasts.sqlite
+          key: forecast-history-${{ github.run_id }}
+          restore-keys: forecast-history-
+      - run: pip install -r requirements.txt
+      - run: python fetch_data.py
+      - run: python results_feed.py
+      - run: python international_data.py
+      - run: python build.py
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - uses: actions/deploy-pages@v4
+        id: publish
