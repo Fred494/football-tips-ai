@@ -1,6 +1,8 @@
 name: Daily football forecasts
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   schedule:
     - cron: '0 6 * * *'
       timezone: Europe/Lisbon
