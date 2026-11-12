@@ -1,3 +1,127 @@
 [
-["pt.1","Portugal","Primeira Liga"],["pt.2","Portugal","Liga Portugal 2"],["es.1","Spain","La Liga"],["es.2","Spain","Segunda División"],["en.1","England","Premier League"],["en.2","England","EFL Championship"],["fr.1","France","Ligue 1"],["fr.2","France","Ligue 2"],["nl.1","Netherlands","Eredivisie"],["it.1","Italy","Serie A"],["it.2","Italy","Serie B"],["se.1","Sweden","Allsvenskan"],["ch.1","Switzerland","Swiss Super League"],["us.1","USA / Canada","Major League Soccer"],["hu.1","Hungary","NB I"],["dk.1","Denmark","Danish Superliga"],["be.1","Belgium","Belgian Pro League"],["de.1","Germany","Bundesliga"],["de.2","Germany","2. Bundesliga"],["gr.1","Greece","Super League Greece"],["pl.1","Poland","Ekstraklasa"],["tr.1","Turkey","Süper Lig"]
+  [
+    "pt.1",
+    "Portugal",
+    "Primeira Liga"
+  ],
+  [
+    "pt.2",
+    "Portugal",
+    "Liga Portugal 2"
+  ],
+  [
+    "es.1",
+    "Spain",
+    "La Liga"
+  ],
+  [
+    "es.2",
+    "Spain",
+    "Segunda División"
+  ],
+  [
+    "en.1",
+    "England",
+    "Premier League"
+  ],
+  [
+    "en.2",
+    "England",
+    "EFL Championship"
+  ],
+  [
+    "fr.1",
+    "France",
+    "Ligue 1"
+  ],
+  [
+    "fr.2",
+    "France",
+    "Ligue 2"
+  ],
+  [
+    "nl.1",
+    "Netherlands",
+    "Eredivisie"
+  ],
+  [
+    "it.1",
+    "Italy",
+    "Serie A"
+  ],
+  [
+    "it.2",
+    "Italy",
+    "Serie B"
+  ],
+  [
+    "se.1",
+    "Sweden",
+    "Allsvenskan"
+  ],
+  [
+    "ch.1",
+    "Switzerland",
+    "Swiss Super League"
+  ],
+  [
+    "us.1",
+    "USA / Canada",
+    "Major League Soccer"
+  ],
+  [
+    "hu.1",
+    "Hungary",
+    "NB I"
+  ],
+  [
+    "dk.1",
+    "Denmark",
+    "Danish Superliga"
+  ],
+  [
+    "be.1",
+    "Belgium",
+    "Belgian Pro League"
+  ],
+  [
+    "de.1",
+    "Germany",
+    "Bundesliga"
+  ],
+  [
+    "de.2",
+    "Germany",
+    "2. Bundesliga"
+  ],
+  [
+    "gr.1",
+    "Greece",
+    "Super League Greece"
+  ],
+  [
+    "pl.1",
+    "Poland",
+    "Ekstraklasa"
+  ],
+  [
+    "tr.1",
+    "Turkey",
+    "Süper Lig"
+  ],
+  [
+    "uefa.cl",
+    "Europe",
+    "UEFA Champions League"
+  ],
+  [
+    "uefa.el",
+    "Europe",
+    "UEFA Europa League"
+  ],
+  [
+    "uefa.ecl",
+    "Europe",
+    "UEFA Conference League"
+  ]
 ]

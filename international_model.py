@@ -49,7 +49,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             x=[elo[h]-elo[a],hr['ppg']-ar['ppg'],hr['gd']/hr['n']-ar['gd']/ar['n'],int(not m['neutral'])]
             if m['score'] is not None and day<now:
                 s,t=m['score']
-                train.append((day,x,0 if s>t else 1 if s==t else 2))
+                train.append((day,x,0 if s>t else 1 if s==t else 2,m['league']))
             if m['score'] is None and day>=now:
                 group=groups[m['group']]
                 hs,as_=summary(group[h],h),summary(group[a],a)
@@ -96,6 +96,8 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
         evaluation=dict(**measure(p,ye),train=len(yt),validation=len(yv),above=int(eligible.sum()),
                         hitAbove=float(hit[eligible].mean()) if eligible.any() else None,
                         start=split[2][0][0],end=split[2][-1][0])
+        nations=np.array([r[3]=='int.unl' for r in split[2]])
+        evaluation['nationsLeague']=measure(p[nations],ye[nations]) if nations.any() else None
         median=np.median(xt,axis=0)
         for m in fixtures:
             x=np.array(m['x'])
@@ -122,5 +124,5 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                             fixturesChecked=checked if code=='int.unl' else None,
                             fixtureStatus=('UEFA schedule checked' if fresh else 'UEFA schedule check overdue')
                             if code=='int.unl' else 'Historical results only · No active fixture feed',
-                            international=True))
+                            international=True,tables=[dict(label='Group '+label,rows=standings(group)) for label,group in sorted(groups.items())] if code=='int.unl' else []))
     return leagues,fixtures,evaluation

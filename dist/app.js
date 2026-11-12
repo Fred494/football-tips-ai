@@ -26,10 +26,11 @@ function card(m){
   const comparison=[[m.international?'Group points/game':'Season points/game',h.ppg,a.ppg],['Goals/game',h.gpg,a.gpg],['Goals conceded/game',h.gapg,a.gapg],['Home vs away points/game',hv.ppg,av.ppg],['Home vs away win rate',hv.n?pct(hv.w/hv.n):null,av.n?pct(av.w/av.n):null],['Home vs away draw rate',hv.n?pct(hv.d/hv.n):null,av.n?pct(av.d/av.n):null],['Venue sample',hv.n,av.n],['Last five points',hr.pts,ar.pts]];
   const explanation=(ranked(m)?m.why:null)?.map(v=>'<p class="reason"><strong>'+esc(v.name)+'</strong> · '+v.value.toFixed(2)+'. '+(v.delta>=0?'+':'')+(v.delta*100).toFixed(1)+' percentage points versus the training median.</p>').join('')||(m.stale?'<p>The league feed has no verified result from the last 21 days. The estimate is excluded from the default ranking.</p>':'<p>Forecast withheld when either team lacks five prior league results or three current-season games, or when no model is available.</p>');
   return '<details class="fixture"><summary><div class="meta">'+esc(getLeague(m.league).name)+'<small>'+esc(m.kickoff?m.kickoff+' Lisbon time':'Kickoff time unavailable')+'</small></div>'+
-    '<div class="teams"><span>'+crest(m.home)+'<strong>'+esc(m.home)+'</strong><small>'+rank(m.home)+'</small></span><span>'+crest(m.away)+'<strong>'+esc(m.away)+'</strong><small>'+rank(m.away)+'</small></span></div>'+
+    '<div class="teams"><span>'+crest(m.home,m.international)+'<strong>'+esc(m.home)+'</strong><small>'+rank(m.home)+'</small></span><span>'+crest(m.away,m.international)+'<strong>'+esc(m.away)+'</strong><small>'+rank(m.away)+'</small></span></div>'+
     '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
     '<section class="box full"><h3>Why this prediction?</h3>'+explanation+(m.why?'<small>Each factor is varied individually. Effects may overlap and are approximate.</small>':'')+'</section>'+
     (m.international&&m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
+    leaguePerformanceBox(m)+
     formBox(m.form[0],m.home,hr,m.long[0],m.international)+formBox(m.form[1],m.away,ar,m.long[1],m.international)+
     '<section class="box"><h3>Team performance</h3>'+table(['Metric',m.home,m.away],comparison.map(x=>row(x)).join(''))+'</section>'+
     '<section class="box"><h3>Probability breakdown</h3>'+(ranked(m)?table(['Outcome','Estimate'],['Home win','Draw','Away win','1X · Home or draw','X2 · Draw or away'].map((k,i)=>row([k,pct([...m.breakdown,1-m.breakdown[2],1-m.breakdown[0]][i])])).join('')):'<p>No estimate for this fixture.</p>')+'</section>'+
@@ -60,10 +61,9 @@ function loadVisibleDays(){
 }
 const visibleDays=loadVisibleDays();
 const dateLabel=(day,options)=>new Intl.DateTimeFormat('en-GB',{...options,timeZone:'UTC'}).format(new Date(day+'T12:00Z'));
-function crest(team){
-  const initials=team.split(/\s+/).filter(word=>word.length>1).slice(0,2).map(word=>word[0]).join('').toUpperCase();
-  const path=data.crests?.[team];
-  return '<span class="crest"><span aria-hidden="true">'+esc(initials)+'</span>'+(path?'<img src="'+esc(path)+'" alt="" loading="lazy">':'')+'</span>';
+function crest(team,international=false){
+ const flag=international?nationCodes[team]:null;
+ return logoBadge(team,flag?'https://flagcdn.com/w80/'+flag+'.png':data.crests?.[team],flag?'flag-badge':'');
 }
 function refreshMatches(){
   const today=dayNow();
@@ -79,7 +79,7 @@ function refreshMatches(){
     return '<section class="day"><div class="day-title"><div><h2>'+(day===today?'Today':pretty(day))+'</h2>'+(day===today?'<span>'+pretty(day)+'</span>':'')+'</div><span class="count">'+picks.length+' '+(picks.length===1?'pick':'picks')+'</span></div>'+
       (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+'</section>';
   }).join('');
-  document.querySelector('#results').querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>img.remove(),{once:true}));
+  bindImageFallback(document.querySelector('#results'));
 }
 function predictions(){
   const today=dayNow();
@@ -108,11 +108,63 @@ function predictions(){
   });
   refreshMatches();
 }
+const leagueLogos={'pt.1':'PPL','es.1':'PD','es.2':'SD','en.1':'PL','en.2':'ELC','fr.1':'FL1','fr.2':'FL2','it.1':'SA','it.2':'SB','de.1':'BL1','de.2':'BL2','uefa.cl':'CL','uefa.el':'EL'};
+const nationCodes=Object.fromEntries(Object.entries({
+ Portugal:'pt',Spain:'es',France:'fr',Italy:'it',Germany:'de',Netherlands:'nl',Belgium:'be',Croatia:'hr',Denmark:'dk',Norway:'no',Sweden:'se',Finland:'fi',Iceland:'is',Switzerland:'ch',Austria:'at',Poland:'pl',Romania:'ro',Bulgaria:'bg',Slovenia:'si',Slovakia:'sk','Czech Republic':'cz',Hungary:'hu',Serbia:'rs','Bosnia and Herzegovina':'ba',Montenegro:'me','North Macedonia':'mk',Albania:'al',Greece:'gr',Turkey:'tr',Kosovo:'xk',Ukraine:'ua',Belarus:'by',Moldova:'md',Georgia:'ge',Armenia:'am',Azerbaijan:'az',Kazakhstan:'kz',Israel:'il',Cyprus:'cy',Estonia:'ee',Latvia:'lv',Lithuania:'lt',Luxembourg:'lu',Malta:'mt','San Marino':'sm',Andorra:'ad',Gibraltar:'gi',Liechtenstein:'li','Faroe Islands':'fo','Republic of Ireland':'ie',England:'gb-eng',Scotland:'gb-sct',Wales:'gb-wls','Northern Ireland':'gb-nir'
+}));
+const leagueLinks={'uefa.cl':'https://www.uefa.com/uefachampionsleague/fixtures-results/','uefa.el':'https://www.uefa.com/uefaeuropaleague/fixtures-results/','uefa.ecl':'https://www.uefa.com/uefaconferenceleague/fixtures-results/'};
+function logoBadge(label,source,classes=''){
+ const initials=label.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase();
+ return '<span class="crest '+classes+'"><span aria-hidden="true">'+esc(initials)+'</span>'+(source?'<img src="'+esc(source)+'" alt="" loading="lazy">':'')+'</span>';
+}
+function leagueBadge(l){
+ const logo=leagueLogos[l.code];
+ return logoBadge(l.name,logo?'https://crests.football-data.org/'+logo+'.png':null,'league-badge');
+}
+function bindImageFallback(root){
+ root.querySelectorAll('img').forEach(img=>{if(img.complete&&!img.naturalWidth)img.remove();else img.addEventListener('error',()=>img.remove(),{once:true});});
+}
+function leagueHit(code){
+ return data.evaluation?.leagues?.[code]??(code==='int.unl'?data.internationalEvaluation?.nationsLeague:null);
+}
+function rateLabel(rate){
+ if(typeof rate!=='number') return '<span class="muted">Unavailable</span>';
+ return rate<.7?'<span class="danger-rate">⚠ '+pct(rate)+' · Below 70%</span>':'<span class="good-rate">'+pct(rate)+'</span>';
+}
+function leaguePerformanceBox(m){
+ const l=getLeague(m.league), e=leagueHit(l.code);
+ return '<section class="box full"><h3>Performance by league</h3><div class="table-scroll"><table><thead><tr><th>League</th><th>Matches</th><th>Selected hit rate</th></tr></thead><tbody><tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr></tbody></table></div><p>Historical results on held-out matches. This is separate from the probability for this match.</p></section>';
+}
+function standingsTable(rows,limit,international){
+ return table(['#','Team','P','W','D','L','DIFF','GLS','Last 5','PTS'],rows.slice(0,limit).map((r,i)=>
+ '<tr><td>'+(i+1)+'</td><td><span class="team-cell">'+crest(r.team,international)+'<span>'+esc(r.team)+'</span></span></td>'+
+ [r.n,r.w,r.d,r.l,r.gd,r.gf+':'+r.ga].map(v=>'<td>'+esc(v)+'</td>').join('')+
+ '<td><span class="form-row">'+(r.form||[]).map(x=>'<span class="form-chip form-'+esc(x)+'">'+esc(x)+'</span>').join('')+'</span></td><td><strong>'+esc(r.pts)+'</strong></td></tr>').join(''));
+}
+function leagueCard(l){
+ const primary=l.table||[], groups=l.tables||[], preview=primary.length?primary:groups[0]?.rows||[];
+ const stamp=l.tableSeason?esc(l.tableSeason):groups.length?esc(groups[0].label):'';
+ const e=leagueHit(l.code);
+ const reason=l.completed===0?'No verified scores in the connected feeds.':
+   !l.upcoming?'Historical scores available. No upcoming fixture feed for this competition.':'';
+ return '<article class="box league-card"><div class="league-heading">'+leagueBadge(l)+'<div><span class="kicker">'+esc(l.country)+'</span><h3>'+esc(l.name)+'</h3></div></div>'+
+   '<label><input type="checkbox" data-code="'+esc(l.code)+'" '+(!disabled.has(l.code)?'checked':'')+'> Include in predictions</label>'+
+   '<p>'+esc(l.completed)+' results · '+esc(l.upcoming)+' upcoming fixtures</p>'+
+   (e?'<p class="league-rate">Historical hit rate · '+rateLabel(e.selected)+'</p>':'')+
+   (preview.length?'<div class="table-scroll"><table><caption>'+stamp+' standings preview</caption><tbody>'+preview.slice(0,3).map((r,i)=>'<tr><td>'+(i+1)+'</td><td><span class="team-cell">'+crest(r.team,l.international)+'<span>'+esc(r.team)+'</span></span></td><td>'+esc(r.pts)+' pts</td></tr>').join('')+'</tbody></table></div>':'')+
+   '<details class="league-details"><summary>View '+(preview.length?'full standings':'coverage')+'</summary><div>'+
+   (primary.length?'<p>'+esc(l.tableSeason)+' · Table reconstructed from available scores. Official tie-breaks, deductions and qualification rules may differ.</p>'+standingsTable(primary,Infinity,false):'')+
+   groups.map(g=>'<h4>'+esc(g.label)+'</h4>'+standingsTable(g.rows,Infinity,true)).join('')+
+   (reason?'<p>'+esc(reason)+'</p>':'')+
+   '<p>'+esc(l.fixtureStatus)+(l.fixturesChecked?' · '+esc(l.fixturesChecked.slice(0,10)):'')+(l.unresolved?' · '+esc(l.unresolved)+' recent scores missing':'')+'</p>'+
+   '<p>'+esc(l.latest?'Latest verified result '+l.latest:'Latest result unavailable')+(l.scoreSource?' · '+esc(l.scoreSource):'')+'</p>'+
+   (leagueLinks[l.code]?'<a href="'+leagueLinks[l.code]+'">Official UEFA fixtures and results</a>':'')+'</div></details></article>';
+}
 function leagues(){
-  main.innerHTML=hero('Competition coverage','Your leagues','Select the competitions you want to see in daily predictions.')+
-    '<p>Fixture checks show when the current schedule was fetched. Results show the latest verified score date and any recent fixtures still missing a score.</p><div class="coverage">'+
-    [...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(l=>'<section class="box"><span class="kicker">'+esc(l.country)+'</span><h3>'+esc(l.name)+'</h3><label><input type="checkbox" data-code="'+esc(l.code)+'" '+(!disabled.has(l.code)?'checked':'')+'> Include in predictions</label><p>'+l.completed+' results · '+l.upcoming+' fixtures in forecast window</p>'+(l.resultsFeed.length?'<p>Scores supplemented by Football-Data.co.uk.</p>':'')+'<p>'+esc(l.fixtureStatus)+(l.fixturesChecked?' · '+esc(l.fixturesChecked.slice(0,10)):'')+(l.unresolved?' · '+l.unresolved+' recent scores missing':'')+'</p><small>'+esc(l.seasons.join(', ')||(l.international?'International coverage':'No season feed found'))+(l.latest?' · Latest result '+esc(l.latest):'')+'</small>'+(l.table.length?'<details><summary>Reconstructed standings</summary>'+table(['#','Team','P','GD','Pts'],l.table.map((r,i)=>row([i+1,r.team,r.n,r.gd,r.pts])).join(''))+'</details>':'')+'</section>').join('')+'</div>';
-  document.querySelectorAll('[data-code]').forEach(el=>el.onchange=()=>{if(el.checked)disabled.delete(el.dataset.code);else disabled.add(el.dataset.code);localStorage.setItem('edge-disabled',JSON.stringify([...disabled]));});
+ main.innerHTML=hero('Competition coverage','Your leagues','Compare standings, recent form and historical model performance.')+
+   '<div class="coverage">'+[...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(leagueCard).join('')+'</div>';
+ main.querySelectorAll('[data-code]').forEach(el=>el.onchange=()=>{if(el.checked)disabled.delete(el.dataset.code);else disabled.add(el.dataset.code);localStorage.setItem('edge-disabled',JSON.stringify([...disabled]));});
+ bindImageFallback(main);
 }
 function performance(){
   const e=data.evaluation;
@@ -124,7 +176,7 @@ function performance(){
       '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
       '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
-      '<section class="box full"><h3>Performance by league</h3>'+table(['League','Matches','Selected hit rate','Log loss'],Object.entries(e.leagues).map(([k,v])=>row([getLeague(k).name,v.n,pct(v.selected),v.logLoss])).join(''))+'</section></div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
+      '<section class="box full"><h3>Performance by league</h3>'+table(['League','Matches','Selected hit rate','Log loss'],Object.entries(e.leagues).map(([k,v])=>'<tr><td>'+esc(getLeague(k).name)+'</td><td>'+esc(v.n)+'</td><td>'+rateLabel(v.selected)+'</td><td>'+esc(v.logLoss)+'</td></tr>').join(''))+'</section></div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
 }
 function route(){
   const page=['#leagues','#performance'].includes(location.hash)?location.hash:'#predictions';

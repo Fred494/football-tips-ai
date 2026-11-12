@@ -42,3 +42,11 @@ The front page starts on today, with an optional jump to the next matchday with 
 ## International competitions
 
 The 2026–27 Nations League group fixtures and scores come from [UEFA's public match schedule](https://www.uefa.com/uefanationsleague/news/02a2-1fea18abbcbc-456e846509e7-1000--2026-27-uefa-nations-league-all-the-league-phase-fixtures-a/). The national-team model is trained separately on the most recent three years of international friendlies and Nations League group scores from the [open international results dataset](https://github.com/martj42/international_results) and UEFA. Historical knockout scores are excluded from training because regulation-time results are not consistently available. Euro, World Cup, qualifiers and the other displayed international competitions have historical coverage only until a verified fixture feed is connected. The editorial source is specific to this Nations League edition.
+
+## Standings and coverage
+
+League cards show a compact standings preview, then expand to all available teams, goals, points and last-five form. Tables are calculated from published scores and labeled by season. Official tie-breaks, deductions, split tables and qualification places can differ. Player ratings are omitted where unavailable.
+
+Football-Data.co.uk's additional score files cover Denmark, Poland, Sweden, Switzerland and MLS. OpenFootball text archives provide historical results for Liga Portugal 2, Hungary and the league phases of the UEFA Champions League, Europa League and Conference League. These supplementary sources are scores-only in the app. The three UEFA cups link to their official fixture pages while an upcoming fixture feed is unavailable.
+
+Each match's expanded analysis shows its league's held-out sample size and selected hit rate. Rates below 70% carry a red warning. The hit rate measures historical accuracy across evaluated picks and is separate from a match's forecast probability.

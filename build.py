@@ -22,7 +22,7 @@ FEATURES = ['Elo difference', 'Recent points per game', 'Season points per game'
             'Home vs away points per game', 'Season goal difference per game', 'Recent goal difference per game',
             'League position advantage', 'Recent opponent strength', 'Home venue points per game']
 PICK_MINIMUM = .75
-PRIORITY = {'en.1','es.1','de.1','it.1','fr.1','pt.1','nl.1'}
+PRIORITY = {'en.1','es.1','de.1','it.1','fr.1','pt.1','nl.1','uefa.cl','uefa.el','uefa.ecl'}
 BASE = 'https://github.com/openfootball/football.json'
 LISBON = ZoneInfo('Europe/Lisbon')
 VENUES = {'en':'Europe/London','de':'Europe/Berlin','es':'Europe/Madrid',
@@ -96,11 +96,12 @@ def read_data():
                 enriched.append(season)
         leagues.append(dict(code=code,country=country,name=name,seasons=dict(sorted(seasons.items())),
                             resultsFeed=enriched,priority=code in PRIORITY,
+                            scoreSource='OpenFootball archive' if code in ('pt.2','hu.1','uefa.cl','uefa.el','uefa.ecl') else 'Football-Data.co.uk',
                             fixturesChecked=refresh.get('checkedAt') if refresh.get('files',{}).get(f'{active}/{code}.json')=='OK' else None))
     return leagues
 
 def standings(current):
-    table=[dict(team=t,**summary(g,t)) for t,g in current.items() if g]
+    table=[dict(team=t,**summary(g,t),form=['W' if m['score'][m['away']==t]>m['score'][m['home']==t] else 'L' if m['score'][m['away']==t]<m['score'][m['home']==t] else 'D' for m in g[-5:]]) for t,g in current.items() if g]
     return sorted(table,key=lambda r:(-r['pts'],-r['gd'],-r['gf'],r['team']))
 
 def features(match, recent, current, elo, table, opponent_history):
@@ -168,6 +169,7 @@ def process(leagues, players):
                         recent[t].append(m)
             last_table=standings(current)
         league['table']=last_table
+        league['tableSeason']=next(reversed(league['seasons']),None)
         league['completed']=sum(m['score'] is not None and m['day']<now for m in all_rows)
         league['upcoming']=sum(m['league']==league['code'] for m in upcoming)
         league['latest']=max((m['day'] for m in all_rows if m['score'] is not None and m['day']<now),default=None)
@@ -302,6 +304,9 @@ def build():
     snapshot=dict(internationalEvaluation=national_evaluation,updated=timestamp,day=TODAY.isoformat(),source=BASE,pickMinimum=PICK_MINIMUM,leagues=leagues,matches=matches,evaluation=evaluation)
     crest_file=ROOT/'crests.json'
     snapshot['crests']=json.loads(crest_file.read_text()) if crest_file.exists() else {}
+    extra_crests=ROOT/'standings_crests.json'
+    if extra_crests.exists():
+        snapshot['crests'].update(json.loads(extra_crests.read_text()))
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:
         db.execute('CREATE TABLE IF NOT EXISTS snapshots (created TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         db.execute('''CREATE TABLE IF NOT EXISTS settlements (

@@ -10,6 +10,7 @@ from pathlib import Path
 
 CODES = dict(zip('en.1 en.2 de.1 de.2 es.1 es.2 fr.1 fr.2 it.1 it.2 nl.1 pt.1 be.1 gr.1 tr.1'.split(),
                  'E0 E1 D1 D2 SP1 SP2 F1 F2 I1 I2 N1 P1 B1 G1 T1'.split()))
+EXTRA = {"dk.1":"DNK","pl.1":"POL","se.1":"SWE","ch.1":"SWZ","us.1":"USA"}
 ROOT = Path(__file__).resolve().parent
 
 def fetch(code, year):
@@ -33,6 +34,29 @@ def fetch(code, year):
         return code, len(results)
     except (OSError, ValueError) as exc:
         return code, str(exc)
+
+def fetch_extra(code,today):
+    year=today.year if code in ('se.1','us.1') else today.year-(today.month<7)
+    seasons={str(y) if code in ('se.1','us.1') else f'{y}-{(y+1)%100:02d}' for y in range(year-2,year+1)}
+    rows=defaultdict(list)
+    try:
+        with urllib.request.urlopen(f'https://www.football-data.co.uk/new/{EXTRA[code]}.csv',timeout=20) as response:
+            payload=response.read().decode('utf-8-sig',errors='replace')
+        for r in csv.DictReader(io.StringIO(payload)):
+            try:
+                raw=r['Season'].split('/')
+                season=raw[0] if len(raw)==1 else f'{raw[0]}-{raw[1][-2:]}'
+                day=datetime.strptime(r['Date'],'%d/%m/%Y').date().isoformat()
+                score=[int(r['HG']),int(r['AG'])]
+                if season in seasons and r['Home'] and r['Away'] and min(score)>=0:
+                    rows[season].append(dict(day=day,home=r['Home'],away=r['Away'],score=score))
+            except (KeyError,TypeError,ValueError):
+                continue
+        for season, games in rows.items():
+            (ROOT/'data'/f'csv_{season}_{code}.json').write_text(json.dumps(games,ensure_ascii=False))
+        return code,sum(map(len,rows.values()))
+    except OSError as exc:
+        return code,str(exc)
 
 def refresh(year):
     with ThreadPoolExecutor(max_workers=15) as pool:
@@ -71,5 +95,9 @@ def merge(rows, results, code, season):
     return sorted(combined,key=lambda r:r['day'])
 
 if __name__=='__main__':
+    from openfootball_text import refresh_text
     today=date.today()
     refresh(today.year-(today.month<7))
+    refresh_text(today.year-(today.month<7))
+    with ThreadPoolExecutor(max_workers=len(EXTRA)) as pool:
+        print('Extra domestic results:',list(pool.map(lambda code:fetch_extra(code,today),EXTRA)))
