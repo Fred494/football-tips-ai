@@ -286,4 +286,4 @@ function route(){
   document.querySelectorAll('nav a').forEach(a=>a.getAttribute('href')===page?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current'));
   ({'#predictions':predictions,'#leagues':leagues,'#performance':performance,'#historico':historyPage})[page]();
 }
-fetch('snapshot.json').then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;document.querySelector('#freshness').textContent='Snapshot '+data.day;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
+fetch('snapshot.json').then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
