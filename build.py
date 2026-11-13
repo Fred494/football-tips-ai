@@ -330,17 +330,34 @@ def build():
     if extra_crests.exists():
         snapshot['crests'].update(json.loads(extra_crests.read_text()))
     international_file = ROOT/'data'/'international-fixtures.json'
+    results_file = ROOT/'data'/'international-results.json'
+    international_scores = {
+        (r['day'],r['home'],r['away']):r['score']
+        for r in json.loads(results_file.read_text())['rows']
+        if r['league']=='int.unl' and r['day']<TODAY.isoformat()
+    } if results_file.exists() else {}
     if international_file.exists():
         for match in json.loads(international_file.read_text())['rows']:
-            if match['score'] is not None and match['day'] <= TODAY.isoformat():
+            score = match['score'] or international_scores.get((match['day'],match['home'],match['away']))
+            if score is not None and match['day'] <= TODAY.isoformat():
                 match_id = f"int.unl|2026-27|{match['day']}|{match['home']}|{match['away']}"
-                final_scores[match_id] = match['score']
+                final_scores[match_id] = score
 
     history_path = ROOT/'dist'/'history.json'
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:
         db.execute('CREATE TABLE IF NOT EXISTS published_history (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
         cached = db.execute('SELECT payload FROM published_history WHERE id = 1').fetchone()
-        history = json.loads(cached[0]) if cached else load_history(history_path)
+        history = load_history(history_path)
+        if cached:
+            # A committed recovery snapshot survives cache misses. Preserve the
+            # earliest published pick and prefer settled rows on timestamp ties.
+            picks = {}
+            for pick in history['picks'] + json.loads(cached[0])['picks']:
+                key = (pick['publishedAt'], pick['status']=='pending')
+                previous = picks.get(pick['id'])
+                if previous is None or key < (previous['publishedAt'], previous['status']=='pending'):
+                    picks[pick['id']] = pick
+            history['picks'] = list(picks.values())
         history = update_history(history, snapshot, final_scores)
         db.execute('INSERT OR REPLACE INTO published_history VALUES (1, ?)', (json.dumps(history),))
     save_history(history_path, history)
