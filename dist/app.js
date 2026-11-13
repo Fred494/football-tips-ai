@@ -61,9 +61,21 @@ function loadVisibleDays(){
 }
 const visibleDays=loadVisibleDays();
 const dateLabel=(day,options)=>new Intl.DateTimeFormat('en-GB',{...options,timeZone:'UTC'}).format(new Date(day+'T12:00Z'));
-function crest(team,international=false){
+function clubKey(name){
+ return name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+   .replace(/\b(fc|afc|cf|ac|sc|cd|sv|ud|calcio)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function crest(team,international=false,logo=null){
+ if (!international && !logo && !data.crests?.[team]) {
+   const key=clubKey(team);
+   const matches=(data.leagues||[]).flatMap(l=>(l.displayTable?.groups||[]).flatMap(g=>g.rows))
+     .filter(r=>r.logo&&[r.team,...r.aliases].some(n=>n&&clubKey(n)===key));
+   const urls=[...new Set(matches.map(r=>r.logo))];
+   if(urls.length===1) logo=urls[0];
+ }
+
  const flag=international?nationCodes[team]:null;
- return logoBadge(team,flag?'https://flagcdn.com/w80/'+flag+'.png':data.crests?.[team],flag?'flag-badge':'');
+ return logoBadge(team,flag?'https://flagcdn.com/w80/'+flag+'.png':(logo||data.crests?.[team]),flag?'flag-badge':'');
 }
 function refreshMatches(){
   const today=dayNow();
@@ -262,13 +274,20 @@ function leaguePerformanceBox(m){
 }
 function standingsTable(rows,limit,international){
  return table(['#','Team','P','W','D','L','DIFF','GLS','Last 5','PTS'],rows.slice(0,limit).map((r,i)=>
- '<tr><td>'+(i+1)+'</td><td><span class="team-cell">'+crest(r.team,international)+'<span>'+esc(r.team)+'</span></span></td>'+
+ '<tr><td>'+(r.rank||i+1)+'</td><td><span class="team-cell">'+crest(r.team,international,r.logo)+'<span>'+esc(r.team)+'</span></span></td>'+
  [r.n,r.w,r.d,r.l,r.gd,r.gf+':'+r.ga].map(v=>'<td>'+esc(v)+'</td>').join('')+
- '<td><span class="form-row">'+(r.form||[]).map(x=>'<span class="form-chip form-'+esc(x)+'">'+esc(x)+'</span>').join('')+'</span></td><td><strong>'+esc(r.pts)+'</strong></td></tr>').join(''));
+ '<td><span class="form-row">'+(r.form?.length?r.form:['—']).map(x=>'<span class="form-chip form-'+esc(x)+'">'+esc(x)+'</span>').join('')+'</span></td><td><strong>'+esc(r.pts)+'</strong></td></tr>').join(''));
 }
 function leagueCard(l){
- const primary=l.table||[], groups=l.tables||[], preview=primary.length?primary:groups[0]?.rows||[];
- const stamp=l.tableSeason?esc(l.tableSeason):groups.length?esc(groups[0].label):'';
+ const published=l.displayTable;
+ const formByTeam=new Map((l.table||[]).map(r=>[clubKey(r.team),r]));
+ const publishedGroups=published?.groups.map(g=>({...g,rows:g.rows.map(r=>{
+   const prior=[r.team,...r.aliases].filter(Boolean).map(t=>formByTeam.get(clubKey(t))).find(Boolean);
+   return {...r,form:published.season===l.tableSeason&&prior?.n===r.n?prior.form:[]};
+ })}));
+
+ const primary=published?[]:l.table||[], groups=publishedGroups||l.tables||[], preview=primary.length?primary:groups[0]?.rows||[];
+ const stamp=published?esc(published.season):l.tableSeason?esc(l.tableSeason):groups.length?esc(groups[0].label):'';
  const e=leagueHit(l.code);
  const reason=l.completed===0?'No verified scores in the connected feeds.':
    !l.upcoming?'Historical scores available. No upcoming fixture feed for this competition.':'';
@@ -276,10 +295,11 @@ function leagueCard(l){
    '<label><input type="checkbox" data-code="'+esc(l.code)+'" '+(!disabled.has(l.code)?'checked':'')+'> Include in predictions</label>'+
    '<p>'+esc(l.completed)+' results · '+esc(l.upcoming)+' upcoming fixtures</p>'+
    (e?'<p class="league-rate">Historical hit rate · '+rateLabel(e.selected)+'</p>':'')+
-   (preview.length?'<div class="table-scroll"><table><caption>'+stamp+' standings preview</caption><tbody>'+preview.slice(0,3).map((r,i)=>'<tr><td>'+(i+1)+'</td><td><span class="team-cell">'+crest(r.team,l.international)+'<span>'+esc(r.team)+'</span></span></td><td>'+esc(r.pts)+' pts</td></tr>').join('')+'</tbody></table></div>':'')+
+   (preview.length?'<div class="table-scroll"><table><caption>'+stamp+' standings preview</caption><tbody>'+preview.slice(0,3).map((r,i)=>'<tr><td>'+(i+1)+'</td><td><span class="team-cell">'+crest(r.team,l.international,r.logo)+'<span>'+esc(r.team)+'</span></span></td><td>'+esc(r.pts)+' pts</td></tr>').join('')+'</tbody></table></div>':'')+
    '<details class="league-details"><summary>View '+(preview.length?'full standings':'coverage')+'</summary><div>'+
    (primary.length?'<p>'+esc(l.tableSeason)+' · Table reconstructed from available scores. Official tie-breaks, deductions and qualification rules may differ.</p>'+standingsTable(primary,Infinity,false):'')+
-   groups.map(g=>'<h4>'+esc(g.label)+'</h4>'+standingsTable(g.rows,Infinity,true)).join('')+
+   groups.map(g=>'<h4>'+esc(g.label)+'</h4>'+standingsTable(g.rows,Infinity,l.international)).join('')+
+   (published?'<p>'+esc(published.season)+' · <a href="'+esc(published.source)+'">Classificação publicada pela ESPN</a> · Consultada em '+esc(published.checkedOn)+'</p>':'')+
    (reason?'<p>'+esc(reason)+'</p>':'')+
    '<p>'+esc(l.fixtureStatus)+(l.fixturesChecked?' · '+esc(l.fixturesChecked.slice(0,10)):'')+(l.unresolved?' · '+esc(l.unresolved)+' recent scores missing':'')+'</p>'+
    '<p>'+esc(l.latest?'Latest verified result '+l.latest:'Latest result unavailable')+(l.scoreSource?' · '+esc(l.scoreSource):'')+'</p>'+

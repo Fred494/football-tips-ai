@@ -34,6 +34,7 @@ jobs:
       - run: python fetch_data.py
       - run: python results_feed.py
       - run: python international_data.py
+      - run: python club_tables.py
       - run: python build.py
       - uses: actions/upload-pages-artifact@v3
         with:

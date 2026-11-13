@@ -324,6 +324,13 @@ def build():
     leagues.extend(national_leagues)
     matches.extend(national_matches)
     snapshot=dict(internationalEvaluation=national_evaluation,updated=timestamp,day=TODAY.isoformat(),source=BASE,pickMinimum=PICK_MINIMUM,leagues=leagues,matches=matches,evaluation=evaluation)
+    club_tables=ROOT/'data'/'club-tables.json'
+    if club_tables.exists():
+        display_tables=json.loads(club_tables.read_text())
+        for league in leagues:
+            table=display_tables.get(league['code'])
+            if table and table['season'] >= (league.get('tableSeason') or ''):
+                league['displayTable']=table
     crest_file=ROOT/'crests.json'
     snapshot['crests']=json.loads(crest_file.read_text()) if crest_file.exists() else {}
     extra_crests=ROOT/'standings_crests.json'
