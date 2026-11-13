@@ -95,7 +95,7 @@ function predictions(){
     '<div class="date-grid" aria-label="Match dates">'+dates.map((day,i)=>{
       const active=i===0||visibleDays.has(day);
       return '<button class="date-chip '+(active?'active':'')+'" data-day="'+day+'" aria-pressed="'+active+'" '+(i===0?'disabled':'')+'><span>'+esc(day===today?'Today':dateLabel(day,{weekday:'short'}))+'</span><strong>'+esc(dateLabel(day,{day:'numeric',month:'short'}))+'</strong></button>';
-    }).join('')+'</div><p class="criteria">All picks above '+Math.round(minimumPick()*100)+'% estimated probability. Major leagues appear first.</p>'+jump+'<div id="results"></div>';
+    }).join('')+'</div><p class="criteria">All picks above '+Math.round(minimumPick()*100)+'% estimated probability. Major leagues appear first.</p>'+jump+'<div id="results"></div>'+cafResults();
   const jumpButton=document.querySelector('#jump-window');
   if(jumpButton)jumpButton.onclick=()=>{windowStart=windowStart?null:next;predictions();};
   document.querySelectorAll('[data-day]:not([disabled])').forEach(b=>b.onclick=()=>{
@@ -161,9 +161,14 @@ function leagueCard(l){
    '<p>'+esc(l.latest?'Latest verified result '+l.latest:'Latest result unavailable')+(l.scoreSource?' · '+esc(l.scoreSource):'')+'</p>'+
    (leagueLinks[l.code]?'<a href="'+leagueLinks[l.code]+'">Official UEFA fixtures and results</a>':'')+'</div></details></article>';
 }
+function cafResults(){
+ const games=getLeague('int.afconq')?.recentResults||[];
+ return games.length?'<section class="box full"><h3>AFCON qualifying results</h3>'+
+   table(['Date','Home','Score','Away'],games.map(m=>row([m.day,m.home,m.score.join('–'),m.away])).join(''))+'</section>':'';
+}
 function leagues(){
  main.innerHTML=hero('Competition coverage','Your leagues','Compare standings, recent form and historical model performance.')+
-   '<div class="coverage">'+[...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(leagueCard).join('')+'</div>';
+   '<div class="coverage">'+[...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(leagueCard).join('')+'</div>'+cafResults();
  main.querySelectorAll('[data-code]').forEach(el=>el.onchange=()=>{if(el.checked)disabled.delete(el.dataset.code);else disabled.add(el.dataset.code);localStorage.setItem('edge-disabled',JSON.stringify([...disabled]));});
  bindImageFallback(main);
 }

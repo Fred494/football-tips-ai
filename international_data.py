@@ -8,6 +8,8 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from afcon import SOURCE as CAF_SOURCE, parse_afcon
+
 ROOT = Path(__file__).resolve().parent
 SCHEDULE = 'https://www.uefa.com/uefanationsleague/news/02a2-1fea18abbcbc-456e846509e7-1000--2026-27-uefa-nations-league-all-the-league-phase-fixtures-a/'
 RESULTS = 'https://raw.githubusercontent.com/martj42/international_results/master/results.csv'
@@ -15,7 +17,7 @@ CODES = {
     'UEFA Nations League': 'int.unl', 'UEFA Euro': 'int.euro',
     'UEFA Euro qualification': 'int.euroq', 'FIFA World Cup': 'int.wc',
     'FIFA World Cup qualification': 'int.wcq', 'Copa América': 'int.copa',
-    'African Cup of Nations': 'int.afcon', 'AFC Asian Cup': 'int.asian',
+    'African Cup of Nations': 'int.afcon', 'African Cup of Nations qualification': 'int.afconq', 'AFC Asian Cup': 'int.asian',
     'Gold Cup': 'int.gold', 'CONCACAF Nations League': 'int.cnl',
 }
 ALIASES = {'Türkiye':'Turkey','Czechia':'Czech Republic','Republic of Ireland':'Republic of Ireland',
@@ -85,6 +87,7 @@ def parse_results(payload,today):
 
 def refresh(today):
     for file, url, parser in [('international-fixtures.json',SCHEDULE,parse_schedule),
+                              ('afcon-fixtures.json',CAF_SOURCE,parse_afcon),
                               ('international-results.json',RESULTS,lambda payload:parse_results(payload,today))]:
         try:
             rows=parser(get(url))
@@ -92,6 +95,10 @@ def refresh(today):
             print(file,exc)
             continue
         path=ROOT/'data'/file
+        if file=='afcon-fixtures.json' and path.exists():
+            previous={(m['day'],m['home'],m['away']):m['score'] for m in json.loads(path.read_text())['rows']}
+            for m in rows:
+                m['score']=previous.get((m['day'],m['home'],m['away']))
         payload=dict(checkedAt=datetime.now(timezone.utc).isoformat(),rows=rows,source=url)
         path.write_text(json.dumps(payload,ensure_ascii=False,separators=(',',':'))+'\n')
         print(file,len(rows))

@@ -19,10 +19,10 @@ def load(file):
 
 def predict_internationals(today, timezone, threshold, summary, predict, measure, standings):
     history=load('international-results.json')
-    schedule=load('international-fixtures.json')
+    schedules={'int.unl':load('international-fixtures.json'),'int.afconq':load('afcon-fixtures.json')}
     now=today.isoformat()
     horizon=(today+timedelta(days=30)).isoformat()
-    verified={(r['day'],r['home'],r['away']):r for r in schedule.get('rows',[])}
+    verified={(r['day'],r['home'],r['away']):r for schedule in schedules.values() for r in schedule.get('rows',[])}
     recent=defaultdict(list)
     elo=defaultdict(lambda:1500.)
     groups=defaultdict(lambda:defaultdict(list))
@@ -30,6 +30,10 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
     for r in history.get('rows',[]):
         if r['eligible']:
             rows[(r['day'],r['home'],r['away'])]=r
+    for r in history.get('rows',[]):
+        key=(r['day'],r['home'],r['away'])
+        if key in verified and verified[key]['league']==r['league'] and verified[key]['score'] is None:
+            verified[key]['score']=r['score']
     rows.update(verified)
     batches=defaultdict(list)
     for r in rows.values():
@@ -37,9 +41,10 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             batches[r['day']].append(r)
     train=[]
     fixtures=[]
-    checked=schedule.get('checkedAt')
-    fresh=bool(checked and datetime.now(timezone)-datetime.fromisoformat(checked)<=timedelta(hours=48))
-    unresolved={t for r in verified.values() if r['score'] is None and r['day']<now for t in (r['home'],r['away'])}
+    checked={code:schedule.get('checkedAt') for code,schedule in schedules.items()}
+    fresh={code:bool(stamp and datetime.now(timezone)-datetime.fromisoformat(stamp)<=timedelta(hours=48))
+           for code,stamp in checked.items()}
+    unresolved={(r['league'],t) for r in verified.values() if r['score'] is None and r['day']<now for t in (r['home'],r['away'])}
     for day, batch in sorted(batches.items()):
         for m in batch:
             h,a=m['home'],m['away']
@@ -51,13 +56,20 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                 s,t=m['score']
                 train.append((day,x,0 if s>t else 1 if s==t else 2,m['league']))
             if m['score'] is None and day>=now:
-                group=groups[m['group']]
+                code=m['league']
+                group=groups[(code,m['group'])]
                 hs,as_=summary(group[h],h),summary(group[a],a)
                 hv=summary([r for r in recent[h] if r['home']==h and not r['neutral']],h)
                 av=summary([r for r in recent[a] if r['away']==a and not r['neutral']],a)
-                kickoff=(datetime.fromisoformat(day+'T'+m['kickoffCET'])-timedelta(hours=1)).strftime('%H:%M')
-                fixtures.append(dict(**m,id=f"int.unl|2026-27|{day}|{h}|{a}",x=x,season='2026–27 · Group '+m['group'],
-                                     kickoff=kickoff,stale=not fresh or h in unresolved or a in unresolved,
+                if 'kickoffUTC' in m:
+                    from datetime import timezone as utc_zone
+                    kickoff=datetime.fromisoformat(day+'T'+m['kickoffUTC']).replace(tzinfo=utc_zone.utc).astimezone(timezone).strftime('%H:%M')
+                else:
+                    kickoff=(datetime.fromisoformat(day+'T'+m['kickoffCET'])-timedelta(hours=1)).strftime('%H:%M')
+                if datetime.fromisoformat(day+'T'+kickoff).replace(tzinfo=timezone)<=datetime.now(timezone):
+                    continue
+                fixtures.append(dict(**m,id=f"{code}|2026-27|{day}|{h}|{a}",x=x,season='2026–27 · Group '+m['group'],
+                                     kickoff=kickoff,stale=not fresh[code] or (code,h) in unresolved or (code,a) in unresolved,
                                      stats=[hs,as_,hv,av,hr,ar],table=standings(group),
                                      form=[recent[t][-5:][::-1] for t in (h,a)],
                                      long=[summary(recent[t][-10:],t) for t in (h,a)],
@@ -75,7 +87,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             for team in (h,a):
                 recent[team].append(m)
                 if 'group' in m:
-                    groups[m['group']][team].append(m)
+                    groups[(m['league'],m['group'])][team].append(m)
     evaluation=None
     if len(train)>=300:
         days=sorted({r[0] for r in train})
@@ -121,8 +133,9 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
         leagues.append(dict(code=code,country='International',name=label,priority=code in {'int.unl','int.euro','int.wc'},
                             completed=len(completed),upcoming=upcoming,table=[],seasons=[],resultsFeed=[],
                             latest=max((r[0] for r in completed),default=None),unresolved=0,
-                            fixturesChecked=checked if code=='int.unl' else None,
-                            fixtureStatus=('UEFA schedule checked' if fresh else 'UEFA schedule check overdue')
-                            if code=='int.unl' else 'Historical results only · No active fixture feed',
-                            international=True,tables=[dict(label='Group '+label,rows=standings(group)) for label,group in sorted(groups.items())] if code=='int.unl' else []))
+                            fixturesChecked=checked.get(code),
+                            fixtureStatus=('Schedule checked' if fresh[code] else 'Schedule check overdue')
+                            if code in schedules else 'Historical results only · No active fixture feed',
+                            international=True,tables=[dict(label='Group '+label,rows=standings(group)) for (comp,label),group in sorted(groups.items()) if comp==code],
+                            recentResults=sorted([r for r in verified.values() if r['league']==code and r['score'] is not None and r['day']<=now],key=lambda r:r['day'],reverse=True)[:24]))
     return leagues,fixtures,evaluation

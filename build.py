@@ -329,19 +329,10 @@ def build():
     extra_crests=ROOT/'standings_crests.json'
     if extra_crests.exists():
         snapshot['crests'].update(json.loads(extra_crests.read_text()))
-    international_file = ROOT/'data'/'international-fixtures.json'
-    results_file = ROOT/'data'/'international-results.json'
-    international_scores = {
-        (r['day'],r['home'],r['away']):r['score']
-        for r in json.loads(results_file.read_text())['rows']
-        if r['league']=='int.unl' and r['day']<TODAY.isoformat()
-    } if results_file.exists() else {}
-    if international_file.exists():
-        for match in json.loads(international_file.read_text())['rows']:
-            score = match['score'] or international_scores.get((match['day'],match['home'],match['away']))
-            if score is not None and match['day'] <= TODAY.isoformat():
-                match_id = f"int.unl|2026-27|{match['day']}|{match['home']}|{match['away']}"
-                final_scores[match_id] = score
+    for league in national_leagues:
+        for match in league.get('recentResults',[]):
+            match_id = f"{league['code']}|2026-27|{match['day']}|{match['home']}|{match['away']}"
+            final_scores[match_id] = match['score']
 
     history_path = ROOT/'dist'/'history.json'
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:
