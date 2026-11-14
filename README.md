@@ -29,7 +29,7 @@ The current free feeds lack verified player-level data. The optional `data/playe
 
 ## Scheduled hosting
 
-The bundled GitHub Actions workflow is configured for daily refresh at 06:00 Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache on a best-effort basis. Keep a separate durable copy if long-term retention is required. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
+The bundled GitHub Actions workflow is configured for daily refresh at 00:00 Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache on a best-effort basis. Keep a separate durable copy if long-term retention is required. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
 
 ## Scope of this version
 
@@ -37,7 +37,7 @@ There is no connected player or xG provider. The team evaluation uses one chrono
 
 ## Dashboard
 
-The front page starts on today, with an optional jump to the next matchday with qualifying picks. The three additional dates can be selected individually. Each day shows all qualifying forecasts with probability above 75%. Major leagues are listed first, then picks are ranked by probability within each group. Club crests are sourced from [Football Team Logos](https://github.com/luukhopman/football-logos) and fall back to initials when unavailable.
+The front page starts on today, with an optional jump to the next matchday with qualifying picks. All four dates can be toggled individually. Each day shows all qualifying forecasts with probability above 75%. Major leagues are listed first, then picks are ranked by probability within each group. Club crests are sourced from [Football Team Logos](https://github.com/luukhopman/football-logos) and fall back to initials when unavailable.
 
 ## International competitions
 

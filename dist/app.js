@@ -60,6 +60,10 @@ function loadVisibleDays(){
   } catch {return new Set();}
 }
 const visibleDays=loadVisibleDays();
+const hiddenStartDays=new Set();
+function dateSelected(day,start){
+  return day===start?!hiddenStartDays.has(day):visibleDays.has(day);
+}
 const dateLabel=(day,options)=>new Intl.DateTimeFormat('en-GB',{...options,timeZone:'UTC'}).format(new Date(day+'T12:00Z'));
 function clubKey(name){
  return name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
@@ -80,7 +84,7 @@ function crest(team,international=false,logo=null){
 function refreshMatches(){
   const today=dayNow();
   const start=windowStart||today;
-  const groups=[start,...[...visibleDays].filter(d=>d>start&&d<=offset(start,3)).sort()];
+  const groups=Array.from({length:4},(_,i)=>offset(start,i)).filter(day=>dateSelected(day,start));
   document.querySelector('#results').innerHTML=groups.map(day=>{
     const fixtures=data.matches.filter(m=>m.day===day&&!disabled.has(m.league));
     const picks=fixtures.filter(m=>!m.stale&&m.prob>minimumPick())
@@ -90,7 +94,7 @@ function refreshMatches(){
     else if(!fixtures.some(m=>ranked(m))) message='There are fixtures for this date, but the available data is insufficient to rank them.';
     return '<section class="day"><div class="day-title"><div><h2>'+(day===today?'Today':pretty(day))+'</h2>'+(day===today?'<span>'+pretty(day)+'</span>':'')+'</div><span class="count">'+picks.length+' '+(picks.length===1?'pick':'picks')+'</span></div>'+
       (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+'</section>';
-  }).join('');
+  }).join('')||'<p class="empty">Select a date above to see its picks.</p>';
   bindImageFallback(document.querySelector('#results'));
 }
 function predictions(){
@@ -104,15 +108,17 @@ function predictions(){
 
   main.innerHTML=hero('Double chance · 1X / X2','Top match picks','Explore the strongest model predictions for today and the next three days.')+
     (data.day!==today?'<p class="notice">Forecast snapshot from '+esc(data.day)+'. A newer refresh is unavailable.</p>':'')+
-    '<div class="date-grid" aria-label="Match dates">'+dates.map((day,i)=>{
-      const active=i===0||visibleDays.has(day);
-      return '<button class="date-chip '+(active?'active':'')+'" data-day="'+day+'" aria-pressed="'+active+'" '+(i===0?'disabled':'')+'><span>'+esc(day===today?'Today':dateLabel(day,{weekday:'short'}))+'</span><strong>'+esc(dateLabel(day,{day:'numeric',month:'short'}))+'</strong></button>';
+    '<div class="date-grid" aria-label="Match dates">'+dates.map(day=>{
+      const active=dateSelected(day,start);
+      return '<button class="date-chip '+(active?'active':'')+'" data-day="'+day+'" aria-pressed="'+active+'"><span>'+esc(day===today?'Today':dateLabel(day,{weekday:'short'}))+'</span><strong>'+esc(dateLabel(day,{day:'numeric',month:'short'}))+'</strong></button>';
     }).join('')+'</div><p class="criteria">All picks above '+Math.round(minimumPick()*100)+'% estimated probability. Major leagues appear first.</p>'+jump+'<div id="results"></div>'+cafResults();
   const jumpButton=document.querySelector('#jump-window');
   if(jumpButton)jumpButton.onclick=()=>{windowStart=windowStart?null:next;predictions();};
-  document.querySelectorAll('[data-day]:not([disabled])').forEach(b=>b.onclick=()=>{
-    if(visibleDays.has(b.dataset.day))visibleDays.delete(b.dataset.day);else visibleDays.add(b.dataset.day);
-    const active=visibleDays.has(b.dataset.day);
+  document.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{
+    const day=b.dataset.day;
+    const selection=day===start?hiddenStartDays:visibleDays;
+    if(selection.has(day))selection.delete(day);else selection.add(day);
+    const active=dateSelected(day,start);
     try {localStorage.setItem('edge-visible-days',JSON.stringify([...visibleDays]));} catch {}
     b.setAttribute('aria-pressed',String(active));
     b.classList.toggle('active',active);
