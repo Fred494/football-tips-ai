@@ -286,9 +286,12 @@ function rateLabel(rate){
 function qualificationBox(m){
  const q=m.qualification;
  if(!q || (q.home==='unknown' && q.away==='unknown')) return '';
+ const change=m.qualificationWinChange;
+ const side=change?.home<0?'home':change?.away<0?'away':null;
+ const adjustment=side?'<p>'+esc(m[side])+' · Probabilidade de vitória reduzida em '+(Math.abs(change[side])*100).toFixed(1)+' pontos percentuais pelo apuramento já garantido.</p>':'';
  const labels={qualified:'Já apurada',eliminated:'Eliminada',open:'Apuramento em aberto',unknown:'Por confirmar'};
  return '<section class="box full"><h3>Situação antes do jogo</h3><p>'+
-   esc(m.home)+' · '+esc(labels[q.home])+' | '+esc(m.away)+' · '+esc(labels[q.away])+'</p></section>';
+   esc(m.home)+' · '+esc(labels[q.home])+' | '+esc(m.away)+' · '+esc(labels[q.away])+'</p>'+adjustment+'</section>';
 }
 function leaguePerformanceBox(m){
  const l=getLeague(m.league), e=leagueHit(l.code);

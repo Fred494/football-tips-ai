@@ -13,7 +13,21 @@ from qualification import group_status
 
 FEATURES=['National team Elo advantage','Recent points per game advantage',
           'Recent goal difference advantage','Home venue',
-          'Home already qualified','Away already qualified','Home eliminated','Away eliminated']
+          'Home eliminated','Away eliminated']
+QUALIFIED_WIN_PENALTY = .05
+
+def adjust_qualification(probabilities, statuses):
+    """Reduce the qualified side's win probability when its rival can still qualify."""
+    adjusted = probabilities.copy()
+    if tuple(statuses) not in (('qualified', 'open'), ('open', 'qualified')):
+        return adjusted
+    winner = 0 if statuses[0] == 'qualified' else 2
+    removed = adjusted[..., winner] * QUALIFIED_WIN_PENALTY
+    adjusted[..., winner] -= removed
+    adjusted[..., 1] += removed / 2
+    adjusted[..., 2-winner] += removed / 2
+    return adjusted
+
 
 def load(file):
     path=ROOT/'data'/file
@@ -62,10 +76,10 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             group_games=group_scores[key]
             statuses=[group_status(m['league'],group_teams[key],group_games,t)
                       if m.get('group') and group_games else 'unknown' for t in (h,a)]
-            x.extend(int(status==kind) for kind in ('qualified','eliminated') for status in statuses)
+            x.extend(int(status=='eliminated') for status in statuses)
             if m['score'] is not None and day<now:
                 s,t=m['score']
-                train.append((day,x,0 if s>t else 1 if s==t else 2,m['league']))
+                train.append((day,x,0 if s>t else 1 if s==t else 2,m['league'],statuses))
             if m['score'] is None and day>=now:
                 code=m['league']
                 group=groups[(code,m['group'])]
@@ -111,9 +125,12 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             return np.array([r[1] for r in rows]),np.array([r[2] for r in rows])
         xt,yt=xy(split[0]); xv,yv=xy(split[1]); xe,ye=xy(split[2])
         model=LogisticRegression(max_iter=1000).fit(xt,yt)
-        temp=minimize_scalar(lambda t:log_loss(yv,predict(model,xv,t),labels=[0,1,2]),
+        def adjusted_predictions(model, features, records, temperature):
+            return np.array([adjust_qualification(prob, record[4])
+                             for prob, record in zip(predict(model,features,temperature),records)])
+        temp=minimize_scalar(lambda t:log_loss(yv,adjusted_predictions(model,xv,split[1],t),labels=[0,1,2]),
                              bounds=(.4,4),method='bounded').x
-        p=predict(model,xe,temp)
+        p=adjusted_predictions(model,xe,split[2],temp)
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
         best=q.argmax(axis=1)
         eligible=q.max(axis=1)>threshold
@@ -130,11 +147,16 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
         median=np.median(live_x,axis=0)
         for m in fixtures:
             x=np.array(m['x'])
-            probs=predict(live_model,x[None,:],temp)[0]
+            statuses=[m['qualification'][side] for side in ('home','away')]
+            base_probs=predict(live_model,x[None,:],temp)[0]
+            probs=adjust_qualification(base_probs,statuses)
+            m['qualificationWinChange']=dict(home=float(probs[0]-base_probs[0]),
+                                             away=float(probs[2]-base_probs[2]))
+
             excluded=2 if probs[2]<=probs[0] else 0
             x_alt=np.repeat(x[None,:],len(x),axis=0)
             np.fill_diagonal(x_alt,median)
-            alt=predict(live_model,x_alt,temp)
+            alt=adjust_qualification(predict(live_model,x_alt,temp),statuses)
             m.update(prob=float(1-probs[excluded]),market='1X' if excluded==2 else 'X2',
                      breakdown=probs.tolist(),why=sorted([
                          dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))
