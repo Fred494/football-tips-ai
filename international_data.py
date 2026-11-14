@@ -97,6 +97,8 @@ def refresh(today):
         path=ROOT/'data'/file
         if file=='afcon-fixtures.json' and path.exists():
             previous={(m['day'],m['home'],m['away']):m['score'] for m in json.loads(path.read_text())['rows']}
+            prior_rows=json.loads(path.read_text())['rows']
+            rows=[m for m in prior_rows if m.get('source')!=CAF_SOURCE]+rows
             for m in rows:
                 m['score']=previous.get((m['day'],m['home'],m['away']))
         payload=dict(checkedAt=datetime.now(timezone.utc).isoformat(),rows=rows,source=url)

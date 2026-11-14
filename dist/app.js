@@ -30,6 +30,7 @@ function card(m){
     '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
     '<section class="box full"><h3>Why this prediction?</h3>'+explanation+(m.why?'<small>Each factor is varied individually. Effects may overlap and are approximate.</small>':'')+'</section>'+
     (m.international&&m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
+    qualificationBox(m)+
     leaguePerformanceBox(m)+
     formBox(m.form[0],m.home,hr,m.long[0],m.international)+formBox(m.form[1],m.away,ar,m.long[1],m.international)+
     '<section class="box"><h3>Team performance</h3>'+table(['Metric',m.home,m.away],comparison.map(x=>row(x)).join(''))+'</section>'+
@@ -273,6 +274,13 @@ function rateLabel(rate){
  if(typeof rate!=='number') return '<span class="muted">Unavailable</span>';
  if(rate>.8) return '<span class="star-rate" title="Above 80% historical hit rate">★ '+pct(rate)+'</span>';
  return rate<.7?'<span class="danger-rate">⚠ '+pct(rate)+' · Below 70%</span>':'<span class="good-rate">'+pct(rate)+'</span>';
+}
+function qualificationBox(m){
+ const q=m.qualification;
+ if(!q || (q.home==='unknown' && q.away==='unknown')) return '';
+ const labels={qualified:'Já apurada',eliminated:'Eliminada',open:'Apuramento em aberto',unknown:'Por confirmar'};
+ return '<section class="box full"><h3>Situação antes do jogo</h3><p>'+
+   esc(m.home)+' · '+esc(labels[q.home])+' | '+esc(m.away)+' · '+esc(labels[q.away])+'</p></section>';
 }
 function leaguePerformanceBox(m){
  const l=getLeague(m.league), e=leagueHit(l.code);

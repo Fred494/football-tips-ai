@@ -9,9 +9,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 
 from international_data import CODES, ROOT
+from qualification import group_status
 
 FEATURES=['National team Elo advantage','Recent points per game advantage',
-          'Recent goal difference advantage','Home venue']
+          'Recent goal difference advantage','Home venue',
+          'Home already qualified','Away already qualified','Home eliminated','Away eliminated']
 
 def load(file):
     path=ROOT/'data'/file
@@ -23,6 +25,10 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
     now=today.isoformat()
     horizon=(today+timedelta(days=30)).isoformat()
     verified={(r['day'],r['home'],r['away']):r for schedule in schedules.values() for r in schedule.get('rows',[])}
+    group_teams=defaultdict(set)
+    group_scores=defaultdict(list)
+    for m in verified.values():
+        group_teams[(m['league'],m['group'])].update((m['home'],m['away']))
     recent=defaultdict(list)
     elo=defaultdict(lambda:1500.)
     groups=defaultdict(lambda:defaultdict(list))
@@ -52,6 +58,11 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             if min(hr['n'],ar['n'])<3:
                 continue
             x=[elo[h]-elo[a],hr['ppg']-ar['ppg'],hr['gd']/hr['n']-ar['gd']/ar['n'],int(not m['neutral'])]
+            key=(m['league'],m.get('group'))
+            group_games=group_scores[key]
+            statuses=[group_status(m['league'],group_teams[key],group_games,t)
+                      if m.get('group') and group_games else 'unknown' for t in (h,a)]
+            x.extend(int(status==kind) for kind in ('qualified','eliminated') for status in statuses)
             if m['score'] is not None and day<now:
                 s,t=m['score']
                 train.append((day,x,0 if s>t else 1 if s==t else 2,m['league']))
@@ -69,7 +80,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                 if datetime.fromisoformat(day+'T'+kickoff).replace(tzinfo=timezone)<=datetime.now(timezone):
                     continue
                 fixtures.append(dict(**m,id=f"{code}|2026-27|{day}|{h}|{a}",x=x,season='2026–27 · Group '+m['group'],
-                                     kickoff=kickoff,stale=not fresh[code] or (code,h) in unresolved or (code,a) in unresolved,
+                                     qualification=dict(zip(('home','away'),statuses)),kickoff=kickoff,stale=not fresh[code] or (code,h) in unresolved or (code,a) in unresolved,
                                      stats=[hs,as_,hv,av,hr,ar],table=standings(group),
                                      form=[recent[t][-5:][::-1] for t in (h,a)],
                                      long=[summary(recent[t][-10:],t) for t in (h,a)],
@@ -84,6 +95,8 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             delta=24*((1 if s>t else .5 if s==t else 0)-expected)
             elo[h]+=delta
             elo[a]-=delta
+            if 'group' in m:
+                group_scores[(m['league'],m['group'])].append(m)
             for team in (h,a):
                 recent[team].append(m)
                 if 'group' in m:
@@ -110,14 +123,18 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                         start=split[2][0][0],end=split[2][-1][0])
         nations=np.array([r[3]=='int.unl' for r in split[2]])
         evaluation['nationsLeague']=measure(p[nations],ye[nations]) if nations.any() else None
-        median=np.median(xt,axis=0)
+        # Refit live predictions on all completed, pre-today fixtures so recent
+        # qualification examples can contribute. Holdout reporting stays unchanged.
+        live_x,live_y=xy(train)
+        live_model=LogisticRegression(max_iter=1000).fit(live_x,live_y)
+        median=np.median(live_x,axis=0)
         for m in fixtures:
             x=np.array(m['x'])
-            probs=predict(model,x[None,:],temp)[0]
+            probs=predict(live_model,x[None,:],temp)[0]
             excluded=2 if probs[2]<=probs[0] else 0
             x_alt=np.repeat(x[None,:],len(x),axis=0)
             np.fill_diagonal(x_alt,median)
-            alt=predict(model,x_alt,temp)
+            alt=predict(live_model,x_alt,temp)
             m.update(prob=float(1-probs[excluded]),market='1X' if excluded==2 else 'X2',
                      breakdown=probs.tolist(),why=sorted([
                          dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))
