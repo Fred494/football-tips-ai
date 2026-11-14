@@ -82,6 +82,14 @@ function crest(team,international=false,logo=null){
  const flag=international?nationCodes[team]:null;
  return logoBadge(team,flag?'https://flagcdn.com/w80/'+flag+'.png':(logo||data.crests?.[team]),flag?'flag-badge':'');
 }
+function otherFixtures(fixtures){
+  if(!fixtures.length) return '';
+  return '<details class="box"><summary>Outros jogos do dia ('+fixtures.length+')</summary>'+
+    table(['Hora de Lisboa','Competição','Jogo','Motivo'],fixtures.map(m=>row([
+      m.kickoff,getLeague(m.league).name,m.home+' – '+m.away,
+      m.stale?'Dados por confirmar':typeof m.prob!=='number'?'Sem previsão':pct(m.prob)+' · Fora das Top Picks'
+    ])).join(''))+'</details>';
+}
 function refreshMatches(){
   const today=dayNow();
   const start=windowStart||today;
@@ -94,7 +102,7 @@ function refreshMatches(){
     if(!fixtures.length) message=day===today?'No fixtures are listed today in the available feeds.':'No fixtures are listed for this date in the available feeds.';
     else if(!fixtures.some(m=>ranked(m))) message='There are fixtures for this date, but the available data is insufficient to rank them.';
     return '<section class="day"><div class="day-title"><div><h2>'+(day===today?'Today':pretty(day))+'</h2>'+(day===today?'<span>'+pretty(day)+'</span>':'')+'</div><span class="count">'+picks.length+' '+(picks.length===1?'pick':'picks')+'</span></div>'+
-      (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+'</section>';
+      (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+otherFixtures(fixtures.filter(m=>!picks.includes(m)))+'</section>';
   }).join('')||'<p class="empty">Select a date above to see its picks.</p>';
   bindImageFallback(document.querySelector('#results'));
 }
@@ -449,4 +457,4 @@ function route(){
   document.querySelectorAll('nav a').forEach(a=>a.getAttribute('href')===page?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current'));
   ({'#predictions':predictions,'#leagues':leagues,'#performance':performance,'#historico':historyPage})[page]();
 }
-fetch('snapshot.json').then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
+fetch('snapshot.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
