@@ -5,7 +5,7 @@ An explainable 1X/X2 dashboard built from real fixture and score feeds. The dash
 ## Run locally
 
 1. Install Python 3.12 and run `pip install -r requirements.txt`.
-2. Run `python fetch_data.py` and `python results_feed.py` to refresh the sources. An existing successful local file is retained on request failure.
+2. Run `python fetch_data.py` then `python results_feed.py` and `python international_data.py` to refresh the sources. An existing successful local file is retained on request failure.
 3. Run `python build.py`.
 4. Run `python -m http.server 8000 --directory dist` and open http://localhost:8000.
 
@@ -19,9 +19,11 @@ The [competition coverage matrix](COVERAGE.md) records the initial feed checks. 
 
 ## Model
 
-Daily cutoff is midnight Lisbon, conservatively excluding same-day results. The build uses the current season and two preceding seasons per league. Models use Elo differential, prior opponents' Elo, reconstructed league position, home and away records, and recent form. Logistic regression and histogram gradient boosting compete on a chronological validation split, with a separate later evaluation period. Temperature scaling keeps the three outcome probabilities coherent. The explanation varies one feature at a time relative to its training median.
+Training uses only results preceding each matchday. Clubs use the current season and two preceding seasons. Both models use up to ten previous matches per team, pre-match opponent Elo to weight the points earned, unbeaten rate, rest and home/away performance. Clubs also use current-season goal difference and reconstructed league position.
 
-A forecast needs five prior league results and three current-season matches per team. Rankings require the current fixture file to have been fetched successfully within 48 hours, the league to have a result in the last 21 days, and neither team to have a scheduled match with an unresolved score in the preceding 14 days. Fetch timestamps indicate when the provider was checked, not when the provider last updated its underlying data. Histórico preserves the first qualifying published pick per fixture and shows it after an exact-match final score is available. The daily build keeps the ledger in the existing SQLite cache and exports it to `dist/history.json`.
+Logistic regression, histogram gradient boosting, Elo + Poisson and Elo + Dixon–Coles share date-based training, calibration and holdout partitions. Temperature scaling preserves coherent 1X2 probabilities. The candidate is selected on validation log loss, before looking at the holdout. Model Performance reports holdout Brier, log loss and calibration by competition and 1X/X2 market, alongside the existing rolling club competition hit rates. Calibration itself is pooled separately for clubs and national teams. Club feature comparisons hold the date splits fixed. The national-team qualification experiment compares 0%, 5% and 10% relative win reductions on held-out fixtures with one qualified selection and a rival still in contention. The live rule uses 5% for verified qualified sides, with an equal split between draw and opponent win if one side has qualified, or transfers both adjustments to the draw if both have.
+
+A club forecast requires ten prior league results and three current-season matches per team. The model uses verified snapshots when recent fixture and score availability passes the data checks. The archive keeps the original probability for each published fixture and market, recovers from the latest public archive if the Actions cache is unavailable, and reconciles final scores on each refresh. A pick is shown as pending until a final score is available. Earlier deployments could archive fixtures further than four days ahead. Those records are carried forward.
 
 ### Player input
 
@@ -29,15 +31,15 @@ The current free feeds lack verified player-level data. The optional `data/playe
 
 ## Scheduled hosting
 
-The bundled GitHub Actions workflow is configured for daily refresh at 00:00 Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache on a best-effort basis. Keep a separate durable copy if long-term retention is required. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
+The bundled GitHub Actions workflow is configured for daily refresh at 00:00 Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache and the deployed archive. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
 
 ## Scope of this version
 
-There is no connected player or xG provider. The team evaluation uses one chronological holdout and two model candidates. Rolling-origin evaluation, Poisson and Dixon–Coles comparisons, and league-specific model selection remain open. Forecast settlement is available in SQLite. The dashboard presents backtest results.
+The free model inputs do not include point-in-time xG or historical squad availability data. Elo goal rates predict scores from historical results and should not be described as shot-based xG. Verified player reports can be supplied using the input above.
 
 ## Dashboard
 
-The front page starts on today, with an optional jump to the next matchday with qualifying picks. All four dates can be toggled individually. Each day shows all qualifying forecasts with probability above 75%. Major leagues are listed first, then picks are ranked by probability within each group. Club crests are sourced from [Football Team Logos](https://github.com/luukhopman/football-logos) and fall back to initials when unavailable.
+The four dates from today through three days ahead can be toggled individually. Top Picks are ordered by calibrated probability within each calendar day, including forecasts at or above 85%. At most one 1X below 85% per day can qualify as a yellow exception. It must reach 80%, have a top-quarter host facing a bottom-quarter visitor, and have a host with at least 2.25 home points per game and a visitor with at most 1.00 away point per game, based on at least five games per side at the relevant venue. This exception requires at least eight ranked teams. Club crests are sourced from [Football Team Logos](https://github.com/luukhopman/football-logos) and fall back to initials when unavailable.
 
 ## International competitions
 

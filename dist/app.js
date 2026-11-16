@@ -16,18 +16,18 @@ const row=(items,highlight=false)=>'<tr'+(highlight?' class="highlight"':'')+'>'
 const number=x=>x==null?'—':x;
 function formBox(matches,t,stats,long,international){
   const context=international?'International matches':'League matches';
-  return '<section class="box"><h3>'+esc(t)+' · Last five</h3><p>League matches · '+stats.n+' available</p>'+
+  return '<section class="box"><h3>'+esc(t)+' · Last ten</h3><p>'+context+' · '+stats.n+' available</p>'+
     table(['Date','Opponent','Venue','Score (H–A)','Result'],matches.map(m=>row([m.day,t===m.home?m.away:m.home,t===m.home?'Home':'Away',m.score.join('–'),result(m,t)])).join(''))+
     '<p>'+stats.w+'W / '+stats.d+'D / '+stats.l+'L · Goals '+stats.gf+'–'+stats.ga+' · '+stats.pts+' pts · '+number(stats.ppg)+' PPG</p><small>Last '+long.n+' matches · '+long.pts+' points</small></section>';
 }
 function card(m){
   const [h,a,hv,av,hr,ar]=m.stats;
   const rank=t=>{const n=m.table.findIndex(r=>r.team===t);return n>=0?'#'+(n+1):'—';};
-  const comparison=[[m.international?'Group points/game':'Season points/game',h.ppg,a.ppg],['Goals/game',h.gpg,a.gpg],['Goals conceded/game',h.gapg,a.gapg],['Home vs away points/game',hv.ppg,av.ppg],['Home vs away win rate',hv.n?pct(hv.w/hv.n):null,av.n?pct(av.w/av.n):null],['Home vs away draw rate',hv.n?pct(hv.d/hv.n):null,av.n?pct(av.d/av.n):null],['Venue sample',hv.n,av.n],['Last five points',hr.pts,ar.pts]];
-  const explanation=(ranked(m)?m.why:null)?.map(v=>'<p class="reason"><strong>'+esc(v.name)+'</strong> · '+v.value.toFixed(2)+'. '+(v.delta>=0?'+':'')+(v.delta*100).toFixed(1)+' percentage points versus the training median.</p>').join('')||(m.stale?'<p>The league feed has no verified result from the last 21 days. The estimate is excluded from the default ranking.</p>':'<p>Forecast withheld when either team lacks five prior league results or three current-season games, or when no model is available.</p>');
-  return '<details class="fixture"><summary><div class="meta">'+esc(getLeague(m.league).name)+'<small>'+esc(m.kickoff?m.kickoff+' Lisbon time':'Kickoff time unavailable')+'</small></div>'+
+  const comparison=[[m.international?'Group points/game':'Season points/game',h.ppg,a.ppg],['Goals/game',h.gpg,a.gpg],['Goals conceded/game',h.gapg,a.gapg],['Home vs away points/game',hv.ppg,av.ppg],['Home vs away win rate',hv.n?pct(hv.w/hv.n):null,av.n?pct(av.w/av.n):null],['Home vs away draw rate',hv.n?pct(hv.d/hv.n):null,av.n?pct(av.d/av.n):null],['Venue sample',hv.n,av.n],['Last ten points',hr.pts,ar.pts]];
+  const explanation=(ranked(m)?m.why:null)?.map(v=>'<p class="reason"><strong>'+esc(v.name)+'</strong> · '+v.value.toFixed(2)+'. '+(v.delta>=0?'+':'')+(v.delta*100).toFixed(1)+' percentage points versus the training median.</p>').join('')||(m.stale?'<p>The league feed has no verified result from the last 21 days. The estimate is excluded from the default ranking.</p>':'<p>Forecast withheld when either team lacks sufficient prior results or three current-season games, or when no model is available.</p>');
+  return '<details class="fixture'+(m.pick==='exception'?' fixture-exception':'')+'"><summary><div class="meta">'+esc(getLeague(m.league).name)+'<small>'+esc(m.kickoff?m.kickoff+' Lisbon time':'Kickoff time unavailable')+'</small></div>'+
     '<div class="teams"><span>'+crest(m.home,m.international)+'<strong>'+esc(m.home)+'</strong><small>'+rank(m.home)+'</small></span><span>'+crest(m.away,m.international)+'<strong>'+esc(m.away)+'</strong><small>'+rank(m.away)+'</small></span></div>'+
-    '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
+    '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+(m.pick==='exception'?'<small class="exception-label">Home-form exception</small>':'')+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
     '<section class="box full"><h3>Why this prediction?</h3>'+explanation+(m.why?'<small>Each factor is varied individually. Effects may overlap and are approximate.</small>':'')+'</section>'+
     (m.international&&m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
     qualificationBox(m)+
@@ -52,8 +52,13 @@ function playerBox(m){
 }
 function hero(k,h,p){return '<section class="hero"><div class="kicker">'+esc(k)+'</div><h1>'+esc(h)+'</h1><p>'+esc(p)+'</p></section>';}
 function tile(label,value){return '<div class="tile"><strong>'+esc(value)+'</strong><small>'+esc(label)+'</small></div>';}
-const minimumPick = () => data.pickMinimum ?? .75;
-let windowStart=null;
+const minimumPick = () => data.pickMinimum ?? .85;
+function beforeStart(m,today){
+  if(m.day!==today) return m.day>today;
+  if(!m.kickoff) return false;
+  const time=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Lisbon',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+  return m.kickoff>time;
+}
 function loadVisibleDays(){
   try {
     const saved=JSON.parse(localStorage.getItem('edge-visible-days'));
@@ -87,17 +92,17 @@ function otherFixtures(fixtures){
   return '<details class="box"><summary>Outros jogos do dia ('+fixtures.length+')</summary>'+
     table(['Hora de Lisboa','Competição','Jogo','Motivo'],fixtures.map(m=>row([
       m.kickoff,getLeague(m.league).name,m.home+' – '+m.away,
-      m.stale?'Dados por confirmar':typeof m.prob!=='number'?'Sem previsão':pct(m.prob)+' · Fora das Top Picks'
+      m.stale?'Dados por confirmar':typeof m.prob!=='number'?'Sem previsão':'Fora das Top Picks'
     ])).join(''))+'</details>';
 }
 function refreshMatches(){
   const today=dayNow();
-  const start=windowStart||today;
+  const start=today;
   const groups=Array.from({length:4},(_,i)=>offset(start,i)).filter(day=>dateSelected(day,start));
   document.querySelector('#results').innerHTML=groups.map(day=>{
     const fixtures=data.matches.filter(m=>m.day===day&&!disabled.has(m.league));
-    const picks=fixtures.filter(m=>!m.stale&&m.prob>minimumPick())
-      .sort((a,b)=>Number(getLeague(b.league).priority)-Number(getLeague(a.league).priority)||b.prob-a.prob||a.home.localeCompare(b.home));
+    const picks=fixtures.filter(m=>m.pick&&beforeStart(m,today))
+      .sort((a,b)=>b.prob-a.prob||a.home.localeCompare(b.home));
     let message='No picks meet the confidence threshold for this date.';
     if(!fixtures.length) message=day===today?'No fixtures are listed today in the available feeds.':'No fixtures are listed for this date in the available feeds.';
     else if(!fixtures.some(m=>ranked(m))) message='There are fixtures for this date, but the available data is insufficient to rank them.';
@@ -108,21 +113,14 @@ function refreshMatches(){
 }
 function predictions(){
   const today=dayNow();
-  const start=windowStart||today;
+  const start=today;
   const dates=Array.from({length:4},(_,i)=>offset(start,i));
-  const next=data.matches.filter(m=>m.day>dates.at(-1)&&!disabled.has(m.league)&&ranked(m)&&m.prob>minimumPick())
-    .map(m=>m.day).sort()[0];
-  const jump=windowStart?'<button id="jump-window" class="window-button">Back to today</button>':
-    next?'<button id="jump-window" class="window-button">Next picks · '+esc(dateLabel(next,{day:'numeric',month:'short'}))+'</button>':'';
-
   main.innerHTML=hero('Double chance · 1X / X2','Top match picks','Explore the strongest model predictions for today and the next three days.')+
     (data.day!==today?'<p class="notice">Forecast snapshot from '+esc(data.day)+'. A newer refresh is unavailable.</p>':'')+
     '<div class="date-grid" aria-label="Match dates">'+dates.map(day=>{
       const active=dateSelected(day,start);
       return '<button class="date-chip '+(active?'active':'')+'" data-day="'+day+'" aria-pressed="'+active+'"><span>'+esc(day===today?'Today':dateLabel(day,{weekday:'short'}))+'</span><strong>'+esc(dateLabel(day,{day:'numeric',month:'short'}))+'</strong></button>';
-    }).join('')+'</div><p class="criteria">All picks above '+Math.round(minimumPick()*100)+'% estimated probability. Major leagues appear first.</p>'+jump+'<div id="results"></div>'+cafResults();
-  const jumpButton=document.querySelector('#jump-window');
-  if(jumpButton)jumpButton.onclick=()=>{windowStart=windowStart?null:next;predictions();};
+    }).join('')+'</div><p class="criteria">Picks at '+Math.round(minimumPick()*100)+'% or higher, ranked by calibrated probability within each day. Yellow marks rare home-form exceptions.</p><div id="results"></div>'+cafResults();
   document.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{
     const day=b.dataset.day;
     const selection=day===start?hiddenStartDays:visibleDays;
@@ -276,7 +274,7 @@ function bindImageFallback(root){
  root.querySelectorAll('img').forEach(img=>{if(img.complete&&!img.naturalWidth)img.remove();else img.addEventListener('error',()=>img.remove(),{once:true});});
 }
 function leagueHit(code){
- return data.evaluation?.leagues?.[code]??(code==='int.unl'?data.internationalEvaluation?.nationsLeague:null);
+ return data.evaluation?.leagues?.[code]??data.internationalEvaluation?.leagues?.[code];
 }
 function rateLabel(rate){
  if(typeof rate!=='number') return '<span class="muted">Unavailable</span>';
@@ -287,8 +285,8 @@ function qualificationBox(m){
  const q=m.qualification;
  if(!q || (q.home==='unknown' && q.away==='unknown')) return '';
  const change=m.qualificationWinChange;
- const side=change?.home<0?'home':change?.away<0?'away':null;
- const adjustment=side?'<p>'+esc(m[side])+' · Probabilidade de vitória reduzida em '+(Math.abs(change[side])*100).toFixed(1)+' pontos percentuais pelo apuramento já garantido.</p>':'';
+ const side=['home','away'].filter(side=>change?.[side]<0);
+ const adjustment=side.map(key=>'<p>'+esc(m[key])+' · Probabilidade de vitória reduzida em '+(Math.abs(change[key])*100).toFixed(1)+' pontos percentuais pelo apuramento já garantido.</p>').join('');
  const labels={qualified:'Já apurada',eliminated:'Eliminada',open:'Apuramento em aberto',unknown:'Por confirmar'};
  return '<section class="box full"><h3>Situação antes do jogo</h3><p>'+
    esc(m.home)+' · '+esc(labels[q.home])+' | '+esc(m.away)+' · '+esc(labels[q.away])+'</p>'+adjustment+'</section>';
@@ -352,6 +350,25 @@ function competitionPerformance(national){
    table(['Competition','Test matches','Historical hit rate'],rows)+
    '<p>'+(national?'A rate appears where verified regulation-time scores were available for testing.':'Ranked by historical hit rate in monthly tests using only earlier matches. Small samples can produce unusually high or low rates.')+'</p></section>';
 }
+function marketCalibration(clubs,nations){
+ const sets=[['All clubs',clubs],['All national teams',nations],
+   ...data.leagues.map(l=>[l.name,(l.international?nations:clubs)?.holdoutLeagues?.[l.code]])];
+ const rows=sets.flatMap(([name,e])=>Object.entries(e?.markets??{}).map(([market,m])=>
+   row([name,market,e.n,m.brier.toFixed(4),m.logLoss.toFixed(4),m.above,
+        pct(m.hitAbove),m.bands.filter(b=>b.lo>=.85).map(b=>
+          Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%: '+pct(b.expected)+' / '+pct(b.observed)+' (n='+b.n+')'
+        ).join(' · ')||'—'])));
+ return '<details class="box full"><summary>Calibration by league and market</summary>'+
+   table(['Competition','Market','Test matches','Brier','Log loss','≥85%','Hit rate ≥85%','85%+ bands · predicted / observed'],rows.join(''))+
+   '<p>Test-period breakdown. Calibration itself is pooled by team type.</p></details>';
+}
+function qualificationTest(intl){
+ const rows=intl.qualification||[];
+ return '<h4>Qualification penalty test</h4>'+(rows.length?
+   table(['Win reduction','Matches','Mean win probability','Observed win rate','Win Brier','1X2 log loss'],
+     rows.map(m=>row([pct(m.penalty),m.n,pct(m.winExpected),pct(m.winObserved),m.winBrier.toFixed(4),m.logLoss])).join('')):
+   '<p>No held-out match met the verified qualification criteria.</p>');
+}
 function performance(){
   const e=data.evaluation;
   const intl=data.internationalEvaluation;
@@ -359,12 +376,13 @@ function performance(){
     (!e?'<p class="notice">Insufficient verified results to evaluate a model.</p>':
       '<p>'+esc(e.name)+' · Test window '+esc(e.start)+' to '+esc(e.end)+' · '+e.train+' training matches since '+esc(e.trainingStart)+' · '+e.validation+' calibration matches</p>'+
       '<div class="stats">'+tile('Test matches',e.n)+tile('Selected outcome hit rate',pct(e.selected))+tile('1X hit rate',pct(e.hit[0]))+tile('X2 hit rate',pct(e.hit[1]))+tile('Multiclass log loss',e.logLoss)+tile('Multiclass Brier',e.brier)+'</div>'+
-      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.filter(b=>b.lo>=.75).map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
-      '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
+      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.filter(b=>b.lo>=.85).map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
+      '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>'+e.displayed.exceptions+' yellow exceptions · '+pct(e.displayed.exceptionHit)+' observed hit rate.</p><p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
-      competitionPerformance(false)+competitionPerformance(true)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p></section>':''));
+      (e.ablations?'<section class="box full"><h3>Form and venue tests</h3>'+table(['Features','Log loss','Brier'],e.ablations.map(m=>row([m.name,m.logLoss,m.brier])).join(''))+'</section>':'')+
+      competitionPerformance(false)+competitionPerformance(true)+marketCalibration(e,intl)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p>'+table(['Model','Log loss','Brier'],(intl.models||[]).map(m=>row([m.name,m.logLoss,m.brier])).join(''))+qualificationTest(intl)+'</section>':''));
 }
-const historyStatus = { hit: 'Acertou', miss: 'Errou' };
+const historyStatus = { hit: 'Acertou', miss: 'Errou', pending: 'Por confirmar' };
 const recentFirst = (a, b) => b.day.localeCompare(a.day) || a.home.localeCompare(b.home, 'pt');
 const historySort = {
   newest: recentFirst,
@@ -378,11 +396,11 @@ const historyOptions = entries => entries.map(([value, label]) =>
   '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('');
 
 function renderHistory(content, history) {
-  const completed = history.picks.filter(pick =>
-    Object.hasOwn(historyStatus, pick.status) &&
-    Array.isArray(pick.score) && pick.score.length === 2 &&
-    pick.score.every(goals => Number.isInteger(goals) && goals >= 0));
-  const leagues = [...new Map(completed.map(pick => [pick.league, pick.leagueName]))]
+  const today = dayNow();
+  const archived = history.picks.filter(pick => Object.hasOwn(historyStatus, pick.status) &&
+    (pick.day < today || (pick.day === today &&
+      (pick.status !== 'pending' || (pick.kickoff && !beforeStart(pick,today))))));
+  const leagues = [...new Map(archived.map(pick => [pick.league, pick.leagueName]))]
     .sort((a, b) => a[1].localeCompare(b[1], 'pt'));
   content.innerHTML =
     '<div class="history-controls" role="group" aria-label="Filtros e ordenação do histórico">' +
@@ -405,7 +423,7 @@ function renderHistory(content, history) {
 
   function updateTeams() {
     const selected = team.value;
-    const teams = [...new Set(completed
+    const teams = [...new Set(archived
       .filter(pick => !league.value || pick.league === league.value)
       .flatMap(pick => [pick.home, pick.away]))].sort((a, b) => a.localeCompare(b, 'pt'));
     team.innerHTML = historyOptions([['', 'Todas as equipas'], ...teams.map(name => [name, name])]);
@@ -413,22 +431,24 @@ function renderHistory(content, history) {
   }
 
   function updateResults() {
-    const picks = completed.filter(pick =>
+    const picks = archived.filter(pick =>
       (!league.value || pick.league === league.value) &&
       (!team.value || pick.home === team.value || pick.away === team.value))
       .sort(historySort[order.value] ?? recentFirst);
     const hits = picks.filter(pick => pick.status === 'hit').length;
+    const misses = picks.filter(pick => pick.status === 'miss').length;
+    const settled = hits + misses;
     const matches = picks.length ? table(['Data', 'Jogo', 'Liga', 'Palpite', 'Probabilidade', 'Resultado', 'Estado'],
       picks.map(pick => {
         const values = [new Intl.DateTimeFormat('pt-PT', { dateStyle: 'short', timeZone: 'UTC' }).format(new Date(pick.day + 'T12:00Z')),
-          pick.home + ' – ' + pick.away, pick.leagueName, pick.market, pct(pick.prob), pick.score.join('–')];
+          pick.home + ' – ' + pick.away, pick.leagueName, pick.market + (pick.exception ? ' · Exceção' : ''), pct(pick.prob), pick.score?.join('–') ?? '—'];
         return '<tr>' + values.map(value => '<td>' + esc(value) + '</td>').join('') +
           '<td><span class="history-status history-' + pick.status + '">' + historyStatus[pick.status] + '</span></td></tr>';
-      }).join('')) : '<p class="empty">' + (completed.length
-        ? 'Nenhum jogo concluído corresponde aos filtros.'
+      }).join('')) : '<p class="empty">' + (archived.length
+        ? 'Nenhum palpite corresponde aos filtros.'
         : 'Os jogos das Top Picks aparecem aqui assim que houver um resultado final confirmado.') + '</p>';
-    results.innerHTML = '<div class="stats">' + tile('Taxa de acerto', picks.length ? pct(hits / picks.length) : '—') +
-      tile('Jogos concluídos', picks.length) + tile('Acertos', hits) + tile('Erros', picks.length - hits) + '</div>' + matches;
+    results.innerHTML = '<div class="stats">' + tile('Taxa de acerto', settled ? pct(hits / settled) : '—') +
+      tile('Jogos concluídos', settled) + tile('Acertos', hits) + tile('Erros', misses) + tile('Por confirmar', picks.length - settled) + '</div>' + matches;
   }
 
   league.addEventListener('change', () => { updateTeams(); updateResults(); });
@@ -440,7 +460,7 @@ function renderHistory(content, history) {
 
 let historyRequest;
 async function historyPage() {
-  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados para jogos concluídos, avaliados pelo resultado aos 90 minutos.');
+  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados, avaliados pelo resultado aos 90 minutos quando confirmado.');
   const content = document.createElement('div');
   content.textContent = 'A carregar o histórico…';
   main.append(content);

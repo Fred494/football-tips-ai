@@ -13,16 +13,21 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from results_feed import merge
-from history import load_history, save_history, update_history
+from history import load_history, load_published_history, merge_picks, save_history, update_history
 from international_model import predict_internationals
+from model_benchmarks import EloGoals, FORM_WINDOW, market_metrics, recent_strength
+from picks import MINIMUM, EXCEPTION_MINIMUM, assign_picks, home_exception
 from player_data import PLAYER_FEATURES, for_match, load_players
 
 ROOT = Path(__file__).resolve().parent
 TODAY = datetime.now(ZoneInfo('Europe/Lisbon')).date()
-FEATURES = ['Elo difference', 'Recent points per game', 'Season points per game',
+FEATURES = ['Elo difference', 'Recent points adjusted for opponent Elo', 'Season points per game',
             'Home vs away points per game', 'Season goal difference per game', 'Recent goal difference per game',
-            'League position advantage', 'Recent opponent strength', 'Home venue points per game']
-PICK_MINIMUM = .75
+            'League position advantage', 'Recent opponent strength', 'Home venue points per game',
+            'Away venue points per game', 'Unbeaten rate advantage', 'Home and away rest difference',
+            'Home recent goals scored', 'Home recent goals conceded',
+            'Away recent goals scored', 'Away recent goals conceded']
+PICK_MINIMUM = MINIMUM
 PRIORITY = {'en.1','es.1','de.1','it.1','fr.1','pt.1','nl.1','uefa.cl','uefa.el','uefa.ecl'}
 BASE = 'https://github.com/openfootball/football.json'
 LISBON = ZoneInfo('Europe/Lisbon')
@@ -105,21 +110,26 @@ def standings(current):
     table=[dict(team=t,**summary(g,t),form=['W' if m['score'][m['away']==t]>m['score'][m['home']==t] else 'L' if m['score'][m['away']==t]<m['score'][m['home']==t] else 'D' for m in g[-5:]]) for t,g in current.items() if g]
     return sorted(table,key=lambda r:(-r['pts'],-r['gd'],-r['gf'],r['team']))
 
-def features(match, recent, current, elo, table, opponent_history):
+def features(match, recent, current, elo, table, opponent_history, window=FORM_WINDOW):
     h,a=match['home'],match['away']
     hs,as_=summary(current[h],h),summary(current[a],a)
-    hr,ar=summary(recent[h][-5:],h),summary(recent[a][-5:],a)
+    hr,ar=[summary(recent[t][-window:],t) for t in (h,a)]
     hv=summary([m for m in current[h] if m['home']==h],h)
     av=summary([m for m in current[a] if m['away']==a],a)
     diff=lambda x,y,k:(x[k] if x[k] is not None else 1.35)-(y[k] if y[k] is not None else 1.35)
     gd=lambda x:x['gd']/max(1,x['n'])
     position={r['team']:i+1 for i,r in enumerate(table)}
     rank_gap=(position.get(a,len(table)+1)-position.get(h,len(table)+1))/max(1,len(table))
-    opponent=lambda t:sum(opponent_history[t][-5:])/max(1,len(opponent_history[t][-5:]))
-    opponent_gap=opponent(h)-opponent(a)
-    return [elo[h]-elo[a],diff(hr,ar,'ppg'),diff(hs,as_,'ppg'),diff(hv,av,'ppg'),
-            gd(hs)-gd(as_),gd(hr)-gd(ar),rank_gap,opponent_gap,
-            hv['ppg'] if hv['ppg'] is not None else 1.35], [hs,as_,hv,av,hr,ar]
+    home_form, home_opponents = recent_strength(h, recent[h], opponent_history[h], window)
+    away_form, away_opponents = recent_strength(a, recent[a], opponent_history[a], window)
+    def rest(team):
+        return min(21, (date.fromisoformat(match['day']) - date.fromisoformat(recent[team][-1]['day'])).days) if recent[team] else 7
+    return [elo[h]-elo[a],home_form-away_form,diff(hs,as_,'ppg'),diff(hv,av,'ppg'),
+            gd(hs)-gd(as_),gd(hr)-gd(ar),rank_gap,home_opponents-away_opponents,
+            hv['ppg'] if hv['ppg'] is not None else 1.35,
+            av['ppg'] if av['ppg'] is not None else 1.35,
+            (hr['w']+hr['d'])/max(1,hr['n'])-(ar['w']+ar['d'])/max(1,ar['n']),
+            rest(h)-rest(a), hr['gpg'] or 0, hr['gapg'] or 0, ar['gpg'] or 0, ar['gapg'] or 0], [hs,as_,hv,av,hr,ar]
 
 def process(leagues, players):
     training, upcoming = [], []
@@ -141,16 +151,18 @@ def process(leagues, players):
                 for m in batch:
                     h,a=m['home'],m['away']
                     x, stats=features(m,recent,current,elo,table,opponent_history)
-                    ready=min(len(recent[h]),len(recent[a]))>=5 and min(len(current[h]),len(current[a]))>=3
+                    ready=min(len(recent[h]),len(recent[a]))>=FORM_WINDOW and min(len(current[h]),len(current[a]))>=3
                     if day < now and m['score'] is not None and ready:
                         left,right=m['score']
                         player_x,_=for_match(players,m,date.fromisoformat(day),LISBON)
-                        training.append((day,league['code'],x,0 if left>right else 1 if left==right else 2,player_x,m['id']))
+                        training.append((day,league['code'],x,0 if left>right else 1 if left==right else 2,player_x,m['id'],m['score'],home_exception(stats,table,h,a),
+                                         stats[4]['ppg']-stats[5]['ppg'],
+                                         features(m,recent,current,elo,table,opponent_history,5)[0]))
                     if now <= day <= horizon and m['score'] is None:
                         player_x,player_details=for_match(players,m,TODAY,LISBON)
                         upcoming.append(dict(**m, x=x, ready=ready, stats=stats,table=table,
                                              playerX=player_x,players=player_details,playersUsed=False,
-                                             form=[recent[t][-5:][::-1] for t in (h,a)],
+                                             form=[recent[t][-FORM_WINDOW:][::-1] for t in (h,a)],
                                              long=[summary(recent[t][-10:],t) for t in (h,a)],
                                              h2h=[r for r in recent[h] if a in (r['home'],r['away'])][-5:][::-1]))
                 for m in batch:
@@ -163,8 +175,8 @@ def process(leagues, players):
                     delta=24*(actual-expected)
                     elo[h]+=delta
                     elo[a]-=delta
-                    opponent_history[h].append(prior_elo[a]-1500)
-                    opponent_history[a].append(prior_elo[h]-1500)
+                    opponent_history[h].append(prior_elo[a])
+                    opponent_history[a].append(prior_elo[h])
                     for t in (h,a):
                         current[t].append(m)
                         recent[t].append(m)
@@ -201,7 +213,7 @@ def measure(p,y):
     return dict(n=len(y),logLoss=round(log_loss(y,p,labels=[0,1,2]),4),
                 brier=round(float(np.mean((p-np.eye(3)[y])**2)*3),4),
                 doubleBrier=np.round(((q-hits)**2).mean(axis=0),4).tolist(),
-                hit=np.round(hits.mean(axis=0),4).tolist(),selected=round(float(hits[i,best].mean()),4))
+                markets=market_metrics(p,y),hit=np.round(hits.mean(axis=0),4).tolist(),selected=round(float(hits[i,best].mean()),4))
 
 def competition_backtest(records):
     """Pool pre-month training games, then score each league's held-out matches."""
@@ -245,13 +257,15 @@ def build():
         candidates=[]
         for name,model,window in [
                 ('Logistic regression · three seasons',LogisticRegression(max_iter=1200),train),
-                ('Gradient boosted trees · three seasons',HistGradientBoostingClassifier(max_iter=85,random_state=42),train)]:
+                ('Gradient boosted trees · three seasons',HistGradientBoostingClassifier(max_iter=85,random_state=42),train),
+                ('Elo + Poisson',EloGoals(),train),
+                ('Elo + Dixon–Coles',EloGoals(correction=True),train)]:
             if len(window)<100:
                 continue
             x_fit,y_fit=unpack(window)
             if len(set(y_fit))!=3:
                 continue
-            model.fit(x_fit,y_fit)
+            model.fit(x_fit,[r[6] for r in window] if isinstance(model,EloGoals) else y_fit)
             temp=minimize_scalar(lambda t:log_loss(yv,predict(model,xv,t),labels=[0,1,2]),
                                  bounds=(.4,4),method='bounded').x
             candidates.append((log_loss(yv,predict(model,xv,temp),labels=[0,1,2]),name,model,temp,window))
@@ -273,24 +287,49 @@ def build():
                 player_fit=(pm,pt,np.median(xp,axis=0))
                 player_evaluation=dict(augmented=measure(predict(pm,xpe,pt),ype),
                                        teamOnly=measure(predict(model,xpe[:,:len(FEATURES)],temp),ype))
+        # Controlled feature comparisons on the same dates using logistic regression.
+        ablations=[]
+        for label, transform in [
+                ('10 matches · opponent-adjusted',lambda x,row:x),
+                ('5 matches · opponent-adjusted',lambda x,row:row[9]),
+                ('10 matches · raw points',lambda x,row:[*x[:1],row[8],*x[2:7],0.,*x[8:]]),
+                ('Opponent-adjusted · without venue form',lambda x,row:[*x[:3],0.,*x[4:8],1.35,1.35,*x[10:]])]:
+            arrays=[np.array([transform(r[2],r) for r in part]) for part in partitions]
+            baseline=LogisticRegression(max_iter=1500).fit(arrays[0],[r[3] for r in train])
+            t=minimize_scalar(lambda t:log_loss(yv,predict(baseline,arrays[1],t),labels=[0,1,2]),
+                              bounds=(.4,4),method='bounded').x
+            ablations.append(dict(name=label, **measure(predict(baseline,arrays[2],t),ye)))
         p=predict(model,xe,temp)
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
         best=q.argmax(axis=1)
         scores=q.max(axis=1)
         hit=np.where(best==0,ye!=2,ye!=0)
         bands=[]
-        for lo,hi in zip([.75,.8,.85,.9,.95],[.8,.85,.9,.95,1.01]):
-            mask=(scores>.75)&(scores>=lo)&(scores<hi)
+        for lo,hi in zip([.85,.9,.95],[.9,.95,1.01]):
+            mask=(scores>=lo)&(scores<hi)
             if mask.any():
                 bands.append(dict(lo=lo,hi=min(hi,1),n=int(mask.sum()),expected=float(scores[mask].mean()),observed=float(hit[mask].mean())))
-        qualifying=scores>PICK_MINIMUM
+        qualifying=scores>=PICK_MINIMUM
+        exceptions=np.zeros(len(test),dtype=bool)
+        exception_days=set()
+        for index in np.argsort(-scores,kind='stable'):
+            day=test[index][0]
+            if (best[index]==0 and EXCEPTION_MINIMUM<=scores[index]<PICK_MINIMUM
+                    and test[index][7] and day not in exception_days):
+                exceptions[index]=True
+                exception_days.add(day)
         match_days={r[0] for r in test}
         shown_days={r[0] for r,shown in zip(test,qualifying) if shown}
         displayed=dict(n=int(qualifying.sum()),hit=float(hit[qualifying].mean()) if qualifying.any() else None,
-                       days=len(shown_days),matchDays=len(match_days))
+                       days=len(shown_days),matchDays=len(match_days),
+                       exceptions=int(exceptions.sum()),
+                       exceptionHit=float(hit[exceptions].mean()) if exceptions.any() else None)
+        league_ids=np.array([r[1] for r in test])
+        holdout_leagues={code:measure(p[league_ids==code],ye[league_ids==code])
+                         for code in sorted(set(league_ids))}
         by_league=competition_backtest(records)
         evaluation=dict(name=name,train=len(chosen_train),trainingStart=chosen_train[0][0],historyStart=records[0][0],historyMatches=len(records),validation=len(val),start=test[0][0],end=test[-1][0],
-                        **measure(p,ye),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,
+                        **measure(p,ye),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,holdoutLeagues=holdout_leagues,ablations=ablations,
                         models=[dict(name=n,train=len(w),trainStart=w[0][0],**measure(predict(m,xe,t),ye)) for _,n,m,t,w in candidates])
         median=np.median(unpack(chosen_train)[0],axis=0)
         eligible=[m for m in matches if m['ready']]
@@ -312,6 +351,7 @@ def build():
                 excluded=2 if probs[2]<=probs[0] else 0
                 m['market']='1X' if excluded==2 else 'X2'
                 m['prob']=(1-probs[excluded]).item()
+                m['homeException']=home_exception(m['stats'],m['table'],m['home'],m['away'])
                 m['breakdown']=probs.tolist()
                 m['why']=sorted([dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))
                                   for i,k in enumerate(feature_names)],key=lambda e:abs(e['delta']),reverse=True)[:3]
@@ -319,7 +359,7 @@ def build():
     for m in matches:
         m.pop('x')
         m.pop('playerX')
-    national_leagues,national_matches,national_evaluation=predict_internationals(
+    national_leagues,national_matches,national_evaluation,national_scores=predict_internationals(
         TODAY,LISBON,PICK_MINIMUM,summary,predict,measure,standings)
     leagues.extend(national_leagues)
     matches.extend(national_matches)
@@ -336,26 +376,19 @@ def build():
     extra_crests=ROOT/'standings_crests.json'
     if extra_crests.exists():
         snapshot['crests'].update(json.loads(extra_crests.read_text()))
-    for league in national_leagues:
-        for match in league.get('recentResults',[]):
-            match_id = f"{league['code']}|2026-27|{match['day']}|{match['home']}|{match['away']}"
-            final_scores[match_id] = match['score']
+    final_scores.update(national_scores)
 
+    assign_picks(snapshot)
     history_path = ROOT/'dist'/'history.json'
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:
         db.execute('CREATE TABLE IF NOT EXISTS published_history (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
         cached = db.execute('SELECT payload FROM published_history WHERE id = 1').fetchone()
         history = load_history(history_path)
-        if cached:
-            # A committed recovery snapshot survives cache misses. Preserve the
-            # earliest published pick and prefer settled rows on timestamp ties.
-            picks = {}
-            for pick in history['picks'] + json.loads(cached[0])['picks']:
-                key = (pick['publishedAt'], pick['status']=='pending')
-                previous = picks.get(pick['id'])
-                if previous is None or key < (previous['publishedAt'], previous['status']=='pending'):
-                    picks[pick['id']] = pick
-            history['picks'] = list(picks.values())
+        published = load_published_history()
+        if cached or published:
+            history['picks'] = merge_picks(history['picks'],
+                                           json.loads(cached[0])['picks'] if cached else [],
+                                           published['picks'] if published else [])
         history = update_history(history, snapshot, final_scores)
         db.execute('INSERT OR REPLACE INTO published_history VALUES (1, ?)', (json.dumps(history),))
     save_history(history_path, history)

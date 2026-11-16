@@ -5,27 +5,34 @@ from datetime import datetime, timedelta
 
 import numpy as np
 from scipy.optimize import minimize_scalar
+from scipy.special import softmax
+from sklearn.ensemble import HistGradientBoostingClassifier
+from model_benchmarks import EloGoals, FORM_WINDOW, recent_strength
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 
 from international_data import CODES, ROOT
 from qualification import group_status
 
-FEATURES=['National team Elo advantage','Recent points per game advantage',
+FEATURES=['National team Elo advantage','Recent points adjusted for opponent Elo',
           'Recent goal difference advantage','Home venue',
-          'Home eliminated','Away eliminated']
+          'Home eliminated','Away eliminated','Home venue points per game',
+          'Away venue points per game','Unbeaten rate advantage','Recent opponent strength',
+          'Home and away rest difference']
 QUALIFIED_WIN_PENALTY = .05
 
-def adjust_qualification(probabilities, statuses):
-    """Reduce the qualified side's win probability when its rival can still qualify."""
+def adjust_qualification(probabilities, statuses, penalty=QUALIFIED_WIN_PENALTY):
+    """Lower each qualified side's win probability and preserve total probability."""
     adjusted = probabilities.copy()
-    if tuple(statuses) not in (('qualified', 'open'), ('open', 'qualified')):
-        return adjusted
-    winner = 0 if statuses[0] == 'qualified' else 2
-    removed = adjusted[..., winner] * QUALIFIED_WIN_PENALTY
-    adjusted[..., winner] -= removed
-    adjusted[..., 1] += removed / 2
-    adjusted[..., 2-winner] += removed / 2
+    winners = [column for column, status in zip((0, 2), statuses) if status == 'qualified']
+    for winner in winners:
+        removed = probabilities[..., winner] * penalty
+        adjusted[..., winner] -= removed
+        if len(winners) == 2:
+            adjusted[..., 1] += removed
+        else:
+            adjusted[..., 1] += removed / 2
+            adjusted[..., 2-winner] += removed / 2
     return adjusted
 
 
@@ -44,6 +51,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
     for m in verified.values():
         group_teams[(m['league'],m['group'])].update((m['home'],m['away']))
     recent=defaultdict(list)
+    opponent_history=defaultdict(list)
     elo=defaultdict(lambda:1500.)
     groups=defaultdict(lambda:defaultdict(list))
     rows={}
@@ -66,26 +74,35 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
            for code,stamp in checked.items()}
     unresolved={(r['league'],t) for r in verified.values() if r['score'] is None and r['day']<now for t in (r['home'],r['away'])}
     for day, batch in sorted(batches.items()):
+        prior_elo={t:elo[t] for m in batch for t in (m['home'],m['away'])}
         for m in batch:
             h,a=m['home'],m['away']
-            hr,ar=summary(recent[h][-5:],h),summary(recent[a][-5:],a)
-            if min(hr['n'],ar['n'])<3:
+            hr,ar=[summary(recent[t][-FORM_WINDOW:],t) for t in (h,a)]
+            if min(hr['n'],ar['n'])<5:
                 continue
-            x=[elo[h]-elo[a],hr['ppg']-ar['ppg'],hr['gd']/hr['n']-ar['gd']/ar['n'],int(not m['neutral'])]
+            home_form, home_opponents = recent_strength(h, recent[h], opponent_history[h])
+            away_form, away_opponents = recent_strength(a, recent[a], opponent_history[a])
+            hv=summary([r for r in recent[h] if r['home']==h and not r['neutral']][-FORM_WINDOW:],h)
+            av=summary([r for r in recent[a] if r['away']==a and not r['neutral']][-FORM_WINDOW:],a)
+            x=[elo[h]-elo[a],home_form-away_form,hr['gd']/hr['n']-ar['gd']/ar['n'],int(not m['neutral'])]
             key=(m['league'],m.get('group'))
             group_games=group_scores[key]
             statuses=[group_status(m['league'],group_teams[key],group_games,t)
                       if m.get('group') and group_games else 'unknown' for t in (h,a)]
             x.extend(int(status=='eliminated') for status in statuses)
+            def rest(team):
+                return min(60, (datetime.fromisoformat(day) - datetime.fromisoformat(recent[team][-1]['day'])).days)
+            x.extend([hv['ppg'] if hv['n'] and not m['neutral'] else 1.35,
+                      av['ppg'] if av['n'] and not m['neutral'] else 1.35,
+                      (hr['w']+hr['d'])/hr['n']-(ar['w']+ar['d'])/ar['n'],
+                      home_opponents-away_opponents,rest(h)-rest(a)])
             if m['score'] is not None and day<now:
                 s,t=m['score']
-                train.append((day,x,0 if s>t else 1 if s==t else 2,m['league'],statuses))
+                train.append((day,x,0 if s>t else 1 if s==t else 2,m['league'],statuses,m['score']))
             if m['score'] is None and day>=now:
                 code=m['league']
                 group=groups[(code,m['group'])]
                 hs,as_=summary(group[h],h),summary(group[a],a)
-                hv=summary([r for r in recent[h] if r['home']==h and not r['neutral']],h)
-                av=summary([r for r in recent[a] if r['away']==a and not r['neutral']],a)
                 if 'kickoffUTC' in m:
                     from datetime import timezone as utc_zone
                     kickoff=datetime.fromisoformat(day+'T'+m['kickoffUTC']).replace(tzinfo=utc_zone.utc).astimezone(timezone).strftime('%H:%M')
@@ -96,7 +113,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                 fixtures.append(dict(**m,id=f"{code}|2026-27|{day}|{h}|{a}",x=x,season='2026–27 · Group '+m['group'],
                                      qualification=dict(zip(('home','away'),statuses)),kickoff=kickoff,stale=not fresh[code] or (code,h) in unresolved or (code,a) in unresolved,
                                      stats=[hs,as_,hv,av,hr,ar],table=standings(group),
-                                     form=[recent[t][-5:][::-1] for t in (h,a)],
+                                     form=[recent[t][-FORM_WINDOW:][::-1] for t in (h,a)],
                                      long=[summary(recent[t][-10:],t) for t in (h,a)],
                                      h2h=[r for r in recent[h] if a in (r['home'],r['away'])][-5:][::-1],
                                      players=[None,None],playersUsed=False,international=True))
@@ -109,6 +126,8 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             delta=24*((1 if s>t else .5 if s==t else 0)-expected)
             elo[h]+=delta
             elo[a]-=delta
+            opponent_history[h].append(prior_elo[a])
+            opponent_history[a].append(prior_elo[h])
             if 'group' in m:
                 group_scores[(m['league'],m['group'])].append(m)
             for team in (h,a):
@@ -124,31 +143,59 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
         def xy(rows):
             return np.array([r[1] for r in rows]),np.array([r[2] for r in rows])
         xt,yt=xy(split[0]); xv,yv=xy(split[1]); xe,ye=xy(split[2])
-        model=LogisticRegression(max_iter=1000).fit(xt,yt)
-        def adjusted_predictions(model, features, records, temperature):
-            return np.array([adjust_qualification(prob, record[4])
-                             for prob, record in zip(predict(model,features,temperature),records)])
-        temp=minimize_scalar(lambda t:log_loss(yv,adjusted_predictions(model,xv,split[1],t),labels=[0,1,2]),
-                             bounds=(.4,4),method='bounded').x
-        p=adjusted_predictions(model,xe,split[2],temp)
+        def apply_penalty(probs, records, penalty=QUALIFIED_WIN_PENALTY):
+            return np.array([adjust_qualification(prob, record[4], penalty)
+                             for prob, record in zip(probs, records)])
+
+        candidates=[]
+        for name, model in [
+                ('Logistic regression',LogisticRegression(max_iter=1500)),
+                ('Gradient boosted trees',HistGradientBoostingClassifier(max_iter=85,random_state=42)),
+                ('Elo + Poisson',EloGoals(neutral_index=3)),
+                ('Elo + Dixon–Coles',EloGoals(correction=True,neutral_index=3))]:
+            model.fit(xt,[r[5] for r in split[0]] if isinstance(model,EloGoals) else yt)
+            raw=predict(model,xv,1.)
+            def calibrated(t):
+                return apply_penalty(softmax(np.log(np.clip(raw,1e-9,1))/t,axis=1),split[1])
+            calibration=minimize_scalar(lambda t:log_loss(yv,calibrated(t),labels=[0,1,2]),
+                                        bounds=(.4,4),method='bounded')
+            candidates.append((calibration.fun,name,model,calibration.x))
+        _,name,model,temp=min(candidates,key=lambda item:item[0])
+        raw=predict(model,xe,temp)
+        p=apply_penalty(raw,split[2])
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
         best=q.argmax(axis=1)
-        eligible=q.max(axis=1)>threshold
+        eligible=q.max(axis=1)>=threshold
         hit=np.where(best==0,ye!=2,ye!=0)
-        evaluation=dict(**measure(p,ye),train=len(yt),validation=len(yv),above=int(eligible.sum()),
+        evaluation=dict(**measure(p,ye),name=name,
+                        models=[dict(name=label,**measure(apply_penalty(predict(candidate,xe,t),split[2]),ye))
+                                for _,label,candidate,t in candidates],
+                        train=len(yt),validation=len(yv),above=int(eligible.sum()),
                         hitAbove=float(hit[eligible].mean()) if eligible.any() else None,
                         start=split[2][0][0],end=split[2][-1][0])
-        nations=np.array([r[3]=='int.unl' for r in split[2]])
-        evaluation['nationsLeague']=measure(p[nations],ye[nations]) if nations.any() else None
-        # Refit live predictions on all completed, pre-today fixtures so recent
-        # qualification examples can contribute. Holdout reporting stays unchanged.
-        live_x,live_y=xy(train)
-        live_model=LogisticRegression(max_iter=1000).fit(live_x,live_y)
-        median=np.median(live_x,axis=0)
+        evaluation['leagues']={}
+        for code in CODES.values():
+            mask=np.array([r[3]==code for r in split[2]])
+            if mask.any():
+                evaluation['leagues'][code]=measure(p[mask],ye[mask])
+        evaluation['holdoutLeagues']=evaluation['leagues']
+        mask=np.array([tuple(r[4]) in (('qualified','open'),('open','qualified')) for r in split[2]])
+        evaluation['qualification']=[]
+        if mask.any():
+            qualified_win=np.array([r[4][0]=='qualified' and r[2]==0 or r[4][1]=='qualified' and r[2]==2
+                                    for r, included in zip(split[2],mask) if included])
+            columns=np.array([0 if r[4][0]=='qualified' else 2 for r, included in zip(split[2],mask) if included])
+            for penalty in (0., .05, .10):
+                adjusted=apply_penalty(raw,split[2],penalty)[mask]
+                win=adjusted[np.arange(len(columns)),columns]
+                evaluation['qualification'].append(dict(
+                    penalty=penalty, winExpected=float(win.mean()), winObserved=float(qualified_win.mean()),
+                    winBrier=float(((win-qualified_win)**2).mean()), **measure(adjusted,ye[mask])))
+        median=np.median(xt,axis=0)
         for m in fixtures:
             x=np.array(m['x'])
             statuses=[m['qualification'][side] for side in ('home','away')]
-            base_probs=predict(live_model,x[None,:],temp)[0]
+            base_probs=predict(model,x[None,:],temp)[0]
             probs=adjust_qualification(base_probs,statuses)
             m['qualificationWinChange']=dict(home=float(probs[0]-base_probs[0]),
                                              away=float(probs[2]-base_probs[2]))
@@ -156,7 +203,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             excluded=2 if probs[2]<=probs[0] else 0
             x_alt=np.repeat(x[None,:],len(x),axis=0)
             np.fill_diagonal(x_alt,median)
-            alt=adjust_qualification(predict(live_model,x_alt,temp),statuses)
+            alt=adjust_qualification(predict(model,x_alt,temp),statuses)
             m.update(prob=float(1-probs[excluded]),market='1X' if excluded==2 else 'X2',
                      breakdown=probs.tolist(),why=sorted([
                          dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))
@@ -177,4 +224,6 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                             if code in schedules else 'Historical results only · No active fixture feed',
                             international=True,tables=[dict(label='Group '+label,rows=standings(group)) for (comp,label),group in sorted(groups.items()) if comp==code],
                             recentResults=sorted([r for r in verified.values() if r['league']==code and r['score'] is not None and r['day']<=now],key=lambda r:r['day'],reverse=True)[:24]))
-    return leagues,fixtures,evaluation
+    scores={f"{r['league']}|2026-27|{r['day']}|{r['home']}|{r['away']}":r['score']
+            for r in verified.values() if r['score'] is not None and r['day']<=now}
+    return leagues,fixtures,evaluation,scores

@@ -19,3 +19,7 @@ nav { flex-wrap: wrap; }
 .history-controls label { display: grid; gap: 5px; min-width: 0; }
 .history-controls select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); }
 .history-updated { font-size: 13px; margin-top: 12px; }
+
+.fixture.fixture-exception {border-color:#c28b19;background:#fff6d6;}
+.fixture-exception .exception-label {color:#674604;font-weight:700;}
+.history-status.history-pending {background:#f2f4f7;color:#384152;}
