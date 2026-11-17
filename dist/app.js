@@ -407,7 +407,7 @@ const historyOptions = entries => entries.map(([value, label]) =>
 
 function renderHistory(content, history) {
   const today = dayNow();
-  const archived = history.picks.filter(pick => pick.prob >= 0.85 && Object.hasOwn(historyStatus, pick.status) &&
+  const archived = history.picks.filter(pick => Object.hasOwn(historyStatus, pick.status) &&
     (pick.day < today || (pick.day === today &&
       (pick.status !== 'pending' || (pick.kickoff && !beforeStart(pick,today))))));
   const leagues = [...new Map(archived.map(pick => [pick.league, pick.leagueName]))]
@@ -455,8 +455,8 @@ function renderHistory(content, history) {
         return '<tr>' + values.map(value => '<td>' + esc(value) + '</td>').join('') +
           '<td><span class="history-status history-' + pick.status + '">' + historyStatus[pick.status] + '</span></td></tr>';
       }).join('')) : '<p class="empty">' + (archived.length
-        ? 'Nenhum palpite de 85% ou mais corresponde aos filtros.'
-        : 'Os jogos das Top Picks aparecem aqui assim que houver um resultado final confirmado.') + '</p>';
+        ? 'Nenhum palpite corresponde aos filtros.'
+        : 'Os palpites das Top Picks aparecem aqui a partir da hora de início do jogo.') + '</p>';
     results.innerHTML = '<div class="stats">' + tile('Taxa de acerto', settled ? pct(hits / settled) : '—') +
       tile('Jogos concluídos', settled) + tile('Acertos', hits) + tile('Erros', misses) + tile('Por confirmar', picks.length - settled) + '</div>' + matches;
   }
@@ -470,7 +470,7 @@ function renderHistory(content, history) {
 
 let historyRequest;
 async function historyPage() {
-  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados com probabilidade de pelo menos 85%, avaliados pelo resultado aos 90 minutos.');
+  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados nas Top Picks, incluindo exceções, avaliados pelo resultado aos 90 minutos.');
   const content = document.createElement('div');
   content.textContent = 'A carregar o histórico…';
   main.append(content);
