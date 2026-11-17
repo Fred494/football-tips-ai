@@ -4,12 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 import numpy as np
-from scipy.optimize import minimize_scalar
-from scipy.special import softmax
 from sklearn.ensemble import HistGradientBoostingClassifier
-from model_benchmarks import EloGoals, FORM_WINDOW, recent_strength
+from model_benchmarks import EloGoals, FORM_WINDOW, ModelBlend, recent_strength, select_forecast_model
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import log_loss
 
 from international_data import CODES, ROOT
 from qualification import group_status
@@ -40,7 +37,7 @@ def load(file):
     path=ROOT/'data'/file
     return json.loads(path.read_text()) if path.exists() else {}
 
-def predict_internationals(today, timezone, threshold, summary, predict, measure, standings):
+def predict_internationals(today, timezone, threshold, summary, measure, standings):
     history=load('international-results.json')
     schedules={'int.unl':load('international-fixtures.json'),'int.afconq':load('afcon-fixtures.json')}
     now=today.isoformat()
@@ -154,22 +151,32 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
                 ('Elo + Poisson',EloGoals(neutral_index=3)),
                 ('Elo + Dixon–Coles',EloGoals(correction=True,neutral_index=3))]:
             model.fit(xt,[r[5] for r in split[0]] if isinstance(model,EloGoals) else yt)
-            raw=predict(model,xv,1.)
-            def calibrated(t):
-                return apply_penalty(softmax(np.log(np.clip(raw,1e-9,1))/t,axis=1),split[1])
-            calibration=minimize_scalar(lambda t:log_loss(yv,calibrated(t),labels=[0,1,2]),
-                                        bounds=(.4,4),method='bounded')
-            candidates.append((calibration.fun,name,model,calibration.x))
-        _,name,model,temp=min(candidates,key=lambda item:item[0])
-        raw=predict(model,xe,temp)
+            candidates.append((name,model))
+        fitted=dict(candidates)
+        candidates.append(('Logistic + Elo Poisson blend',ModelBlend(
+            fitted['Logistic regression'],fitted['Elo + Poisson'])))
+        validation_codes=np.array([r[3] for r in split[1]])
+        test_codes=np.array([r[3] for r in split[2]])
+
+        def adjust_validation(probabilities, mask):
+            return apply_penalty(probabilities,[r for r,included in zip(split[1],mask) if included])
+
+        name,model,calibration,incumbent,baselines=select_forecast_model(
+            candidates,xv,yv,validation_codes,np.array([r[0] for r in split[1]]),adjust_validation)
+        incumbent_name,incumbent_model,incumbent_calibration=incumbent
+        raw=calibration.predict(model.predict_proba(xe),test_codes)
         p=apply_penalty(raw,split[2])
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
         best=q.argmax(axis=1)
         eligible=q.max(axis=1)>=threshold
         hit=np.where(best==0,ye!=2,ye!=0)
         evaluation=dict(**measure(p,ye),name=name,
-                        models=[dict(name=label,**measure(apply_penalty(predict(candidate,xe,t),split[2]),ye))
-                                for _,label,candidate,t in candidates],
+                        calibration=calibration.method,calibratedLeagues=sorted(calibration.offsets),
+                        incumbent=dict(name=incumbent_name,**measure(apply_penalty(
+                            incumbent_calibration.predict(incumbent_model.predict_proba(xe),test_codes),split[2]),ye)),
+                        models=[dict(name=label,**measure(apply_penalty(
+                            calibrator.predict(candidate.predict_proba(xe),test_codes),split[2]),ye))
+                                for label,(_,candidate,calibrator) in baselines.items()],
                         train=len(yt),validation=len(yv),above=int(eligible.sum()),
                         hitAbove=float(hit[eligible].mean()) if eligible.any() else None,
                         start=split[2][0][0],end=split[2][-1][0])
@@ -195,7 +202,7 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
         for m in fixtures:
             x=np.array(m['x'])
             statuses=[m['qualification'][side] for side in ('home','away')]
-            base_probs=predict(model,x[None,:],temp)[0]
+            base_probs=calibration.predict(model.predict_proba(x[None,:]),np.array([m['league']]))[0]
             probs=adjust_qualification(base_probs,statuses)
             m['qualificationWinChange']=dict(home=float(probs[0]-base_probs[0]),
                                              away=float(probs[2]-base_probs[2]))
@@ -203,7 +210,8 @@ def predict_internationals(today, timezone, threshold, summary, predict, measure
             excluded=2 if probs[2]<=probs[0] else 0
             x_alt=np.repeat(x[None,:],len(x),axis=0)
             np.fill_diagonal(x_alt,median)
-            alt=adjust_qualification(predict(model,x_alt,temp),statuses)
+            alt=adjust_qualification(
+                calibration.predict(model.predict_proba(x_alt),np.repeat(m['league'],len(x))),statuses)
             m.update(prob=float(1-probs[excluded]),market='1X' if excluded==2 else 'X2',
                      breakdown=probs.tolist(),why=sorted([
                          dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))

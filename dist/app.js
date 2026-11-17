@@ -360,7 +360,7 @@ function marketCalibration(clubs,nations){
         ).join(' · ')||'—'])));
  return '<details class="box full"><summary>Calibration by league and market</summary>'+
    table(['Competition','Market','Test matches','Brier','Log loss','≥85%','Hit rate ≥85%','85%+ bands · predicted / observed'],rows.join(''))+
-   '<p>Test-period breakdown. Calibration itself is pooled by team type.</p></details>';
+   '<p>Test-period breakdown. Competition adjustments are used only when selected in validation and supported by enough prior results.</p></details>';
 }
 function qualificationTest(intl){
  const rows=intl.qualification||[];
@@ -368,6 +368,16 @@ function qualificationTest(intl){
    table(['Win reduction','Matches','Mean win probability','Observed win rate','Win Brier','1X2 log loss'],
      rows.map(m=>row([pct(m.penalty),m.n,pct(m.winExpected),pct(m.winObserved),m.winBrier.toFixed(4),m.logLoss])).join('')):
    '<p>No held-out match met the verified qualification criteria.</p>');
+}
+function activeCalibration(e){
+ const names={temperature:'temperature scaling','outcome bias':'temperature and outcome offsets',
+   competition:'temperature and regularized competition offsets'};
+ if(!e.calibration) return '';
+ const competitions=e.calibratedLeagues?.length?' · '+e.calibratedLeagues.length+' competition adjustments':'';
+ return '<p>Active model: '+esc(e.name)+' · '+esc(names[e.calibration])+esc(competitions)+
+   ' · Log loss '+esc(e.logLoss)+' · Brier '+esc(e.brier)+'</p>'+
+   (e.incumbent?'<p>Previous selection rule on the same test: '+esc(e.incumbent.name)+
+     ' · Log loss '+esc(e.incumbent.logLoss)+' · Brier '+esc(e.incumbent.brier)+'</p>':'');
 }
 function performance(){
   const e=data.evaluation;
@@ -380,7 +390,7 @@ function performance(){
       '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>'+e.displayed.exceptions+' yellow exceptions · '+pct(e.displayed.exceptionHit)+' observed hit rate.</p><p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
       (e.ablations?'<section class="box full"><h3>Form and venue tests</h3>'+table(['Features','Log loss','Brier'],e.ablations.map(m=>row([m.name,m.logLoss,m.brier])).join(''))+'</section>':'')+
-      competitionPerformance(false)+competitionPerformance(true)+marketCalibration(e,intl)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p>'+table(['Model','Log loss','Brier'],(intl.models||[]).map(m=>row([m.name,m.logLoss,m.brier])).join(''))+qualificationTest(intl)+'</section>':''));
+      competitionPerformance(false)+competitionPerformance(true)+marketCalibration(e,intl)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p>'+activeCalibration(intl)+table(['Model','Log loss','Brier'],(intl.models||[]).map(m=>row([m.name,m.logLoss,m.brier])).join(''))+qualificationTest(intl)+'</section>':''));
 }
 const historyStatus = { hit: 'Acertou', miss: 'Errou', pending: 'Por confirmar' };
 const recentFirst = (a, b) => b.day.localeCompare(a.day) || a.home.localeCompare(b.home, 'pt');
@@ -397,7 +407,7 @@ const historyOptions = entries => entries.map(([value, label]) =>
 
 function renderHistory(content, history) {
   const today = dayNow();
-  const archived = history.picks.filter(pick => Object.hasOwn(historyStatus, pick.status) &&
+  const archived = history.picks.filter(pick => pick.prob >= 0.85 && Object.hasOwn(historyStatus, pick.status) &&
     (pick.day < today || (pick.day === today &&
       (pick.status !== 'pending' || (pick.kickoff && !beforeStart(pick,today))))));
   const leagues = [...new Map(archived.map(pick => [pick.league, pick.leagueName]))]
@@ -445,7 +455,7 @@ function renderHistory(content, history) {
         return '<tr>' + values.map(value => '<td>' + esc(value) + '</td>').join('') +
           '<td><span class="history-status history-' + pick.status + '">' + historyStatus[pick.status] + '</span></td></tr>';
       }).join('')) : '<p class="empty">' + (archived.length
-        ? 'Nenhum palpite corresponde aos filtros.'
+        ? 'Nenhum palpite de 85% ou mais corresponde aos filtros.'
         : 'Os jogos das Top Picks aparecem aqui assim que houver um resultado final confirmado.') + '</p>';
     results.innerHTML = '<div class="stats">' + tile('Taxa de acerto', settled ? pct(hits / settled) : '—') +
       tile('Jogos concluídos', settled) + tile('Acertos', hits) + tile('Erros', misses) + tile('Por confirmar', picks.length - settled) + '</div>' + matches;
@@ -460,7 +470,7 @@ function renderHistory(content, history) {
 
 let historyRequest;
 async function historyPage() {
-  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados, avaliados pelo resultado aos 90 minutos quando confirmado.');
+  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados com probabilidade de pelo menos 85%, avaliados pelo resultado aos 90 minutos.');
   const content = document.createElement('div');
   content.textContent = 'A carregar o histórico…';
   main.append(content);

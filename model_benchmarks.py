@@ -1,8 +1,10 @@
 """Football features and chronological benchmark helpers."""
 import numpy as np
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize, minimize_scalar
+from scipy.special import softmax
 from scipy.stats import poisson, skellam
 from sklearn.linear_model import PoissonRegressor
+from sklearn.metrics import log_loss
 
 
 FORM_WINDOW = 10
@@ -83,3 +85,107 @@ def market_metrics(p, y):
                               bands=bands, above=int(eligible.sum()),
                               hitAbove=float(hits[eligible].mean()) if eligible.any() else None)
     return result
+
+
+class ProbabilityCalibration:
+    """Preserve a single 1X2 distribution while calibrating the win/draw odds."""
+    def __init__(self, method):
+        self.method = method
+        self.offsets = {}
+
+    @staticmethod
+    def logits(probabilities):
+        return np.log(np.clip(probabilities, 1e-9, 1))
+
+    def fit(self, probabilities, outcomes, competitions):
+        logits = self.logits(probabilities)
+        indicator = np.eye(3)[outcomes]
+
+        def loss(params, base, observed, shrinkage):
+            offsets = [params[1], 0., params[2]] if len(params) == 3 else 0.
+            calibrated = softmax(base / params[0] + offsets, axis=1)
+            cross_entropy = -np.sum(observed * np.log(np.clip(calibrated, 1e-9, 1)))
+            return cross_entropy + shrinkage * np.sum(np.square(params[1:]))
+
+        if self.method == 'temperature':
+            self.temperature = minimize_scalar(
+                lambda t: loss([t], logits, indicator, 0),
+                bounds=(.4, 4), method='bounded').x
+            self.bias = np.zeros(3)
+            return self
+
+        fit = minimize(loss, [1., 0., 0.], args=(logits, indicator, 16),
+                       bounds=[(.4, 4), (-1., 1.), (-1., 1.)], method='L-BFGS-B')
+        self.temperature = fit.x[0]
+        self.bias = np.array([fit.x[1], 0., fit.x[2]])
+        if self.method == 'competition':
+            pooled = logits / self.temperature + self.bias
+            for code in sorted(set(competitions)):
+                mask = competitions == code
+                if mask.sum() < 60:
+                    continue
+                fit = minimize(lambda delta: loss([1., *delta], pooled[mask], indicator[mask], 80),
+                               [0., 0.], bounds=[(-.5, .5)] * 2, method='L-BFGS-B')
+                self.offsets[code] = np.array([fit.x[0], 0., fit.x[1]])
+        return self
+
+    def predict(self, probabilities, competitions):
+        logits = self.logits(probabilities) / self.temperature + self.bias
+        for code, offsets in self.offsets.items():
+            logits[competitions == code] += offsets
+        return softmax(logits, axis=1)
+
+
+class ModelBlend:
+    def __init__(self, first, second):
+        self.first, self.second = first, second
+
+    def predict_proba(self, features):
+        return (self.first.predict_proba(features) + self.second.predict_proba(features)) / 2
+
+
+def select_forecast_model(fitted, p_features, labels, codes, dates, adjust=None):
+    """Fit calibration on the earlier dates and choose on later validation dates."""
+    if adjust is None:
+        adjust = lambda probabilities, mask: probabilities
+    unique_dates = sorted(set(dates))
+    if len(unique_dates) < 2:
+        raise ValueError('Calibration needs two distinct matchdays')
+    cut = unique_dates[max(1, int(.6 * len(unique_dates)))]
+    earlier = dates < cut
+    later = ~earlier
+    candidates = []
+    base = {}
+    for name, model in fitted:
+        raw = model.predict_proba(p_features)
+        for method in ('temperature', 'outcome bias', 'competition'):
+            calibration = ProbabilityCalibration(method).fit(raw[earlier], labels[earlier], codes[earlier])
+            forecast = adjust(calibration.predict(raw[later], codes[later]), later)
+            metrics = measure_binary_markets(forecast, labels[later])
+            validation_loss = log_loss(labels[later], forecast, labels=[0, 1, 2])
+            candidates.append((validation_loss, metrics, name, model, method))
+        all_matches = np.ones(len(labels), dtype=bool)
+        logits = ProbabilityCalibration.logits(raw)
+        def baseline_loss(temperature):
+            forecast = adjust(softmax(logits / temperature, axis=1), all_matches)
+            return log_loss(labels, forecast, labels=[0, 1, 2])
+        fit = minimize_scalar(baseline_loss, bounds=(.4, 4), method='bounded')
+        calibration = ProbabilityCalibration('temperature')
+        calibration.temperature = fit.x
+        calibration.bias = np.zeros(3)
+        base[name] = (fit.fun, model, calibration)
+
+    _, incumbent_name, incumbent_model, incumbent_calibration = min(
+        (loss, name, model, calibration) for name, (loss, model, calibration) in base.items()
+        if name != 'Logistic + Elo Poisson blend'
+    )
+    best = min(candidates, key=lambda c: (c[0], c[1]))
+    best_model, best_method = best[3:]
+    calibration = ProbabilityCalibration(best_method).fit(best_model.predict_proba(p_features), labels, codes)
+    return best[2], best_model, calibration, (incumbent_name, incumbent_model, incumbent_calibration), base
+
+
+def measure_binary_markets(probabilities, outcomes):
+    predicted = 1 - probabilities[:, [2, 0]]
+    actual = outcomes[:, None] != np.array([2, 0])
+    return float(np.mean((predicted - actual) ** 2))

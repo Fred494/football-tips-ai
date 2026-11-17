@@ -15,7 +15,8 @@ from sklearn.metrics import log_loss
 from results_feed import merge
 from history import load_history, load_published_history, merge_picks, save_history, update_history
 from international_model import predict_internationals
-from model_benchmarks import EloGoals, FORM_WINDOW, market_metrics, recent_strength
+from model_benchmarks import (EloGoals, FORM_WINDOW, ModelBlend, market_metrics, recent_strength,
+                              select_forecast_model)
 from picks import MINIMUM, EXCEPTION_MINIMUM, assign_picks, home_exception
 from player_data import PLAYER_FEATURES, for_match, load_players
 
@@ -266,10 +267,16 @@ def build():
             if len(set(y_fit))!=3:
                 continue
             model.fit(x_fit,[r[6] for r in window] if isinstance(model,EloGoals) else y_fit)
-            temp=minimize_scalar(lambda t:log_loss(yv,predict(model,xv,t),labels=[0,1,2]),
-                                 bounds=(.4,4),method='bounded').x
-            candidates.append((log_loss(yv,predict(model,xv,temp),labels=[0,1,2]),name,model,temp,window))
-        _,name,model,temp,chosen_train=min(candidates,key=lambda c:c[0])
+            candidates.append((name,model))
+        fitted=dict(candidates)
+        candidates.append(('Logistic + Elo Poisson blend',ModelBlend(
+            fitted['Logistic regression · three seasons'],fitted['Elo + Poisson'])))
+        validation_codes=np.array([r[1] for r in val])
+        league_ids=np.array([r[1] for r in test])
+        name,model,calibration,incumbent,baselines=select_forecast_model(
+            candidates,xv,yv,validation_codes,np.array([r[0] for r in val]))
+        chosen_train=train
+        incumbent_name,incumbent_model,incumbent_calibration=incumbent
         player_fit=None
         player_evaluation=None
         with_players=[[r for r in part if r[4] is not None] for part in partitions]
@@ -283,10 +290,10 @@ def build():
             pm=LogisticRegression(max_iter=1200).fit(xp,yp)
             pt=minimize_scalar(lambda t:log_loss(ypv,predict(pm,xpv,t),labels=[0,1,2]),
                                bounds=(.4,4),method='bounded').x
-            if log_loss(ypv,predict(pm,xpv,pt),labels=[0,1,2]) < log_loss(ypv,predict(model,xpv[:,:len(FEATURES)],temp),labels=[0,1,2]):
+            if log_loss(ypv,predict(pm,xpv,pt),labels=[0,1,2]) < log_loss(ypv,calibration.predict(model.predict_proba(xpv[:,:len(FEATURES)]),np.array([r[1] for r in player_val])),labels=[0,1,2]):
                 player_fit=(pm,pt,np.median(xp,axis=0))
                 player_evaluation=dict(augmented=measure(predict(pm,xpe,pt),ype),
-                                       teamOnly=measure(predict(model,xpe[:,:len(FEATURES)],temp),ype))
+                                       teamOnly=measure(calibration.predict(model.predict_proba(xpe[:,:len(FEATURES)]),np.array([r[1] for r in player_test])),ype))
         # Controlled feature comparisons on the same dates using logistic regression.
         ablations=[]
         for label, transform in [
@@ -299,7 +306,7 @@ def build():
             t=minimize_scalar(lambda t:log_loss(yv,predict(baseline,arrays[1],t),labels=[0,1,2]),
                               bounds=(.4,4),method='bounded').x
             ablations.append(dict(name=label, **measure(predict(baseline,arrays[2],t),ye)))
-        p=predict(model,xe,temp)
+        p=calibration.predict(model.predict_proba(xe),league_ids)
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
         best=q.argmax(axis=1)
         scores=q.max(axis=1)
@@ -324,19 +331,24 @@ def build():
                        days=len(shown_days),matchDays=len(match_days),
                        exceptions=int(exceptions.sum()),
                        exceptionHit=float(hit[exceptions].mean()) if exceptions.any() else None)
-        league_ids=np.array([r[1] for r in test])
         holdout_leagues={code:measure(p[league_ids==code],ye[league_ids==code])
                          for code in sorted(set(league_ids))}
         by_league=competition_backtest(records)
         evaluation=dict(name=name,train=len(chosen_train),trainingStart=chosen_train[0][0],historyStart=records[0][0],historyMatches=len(records),validation=len(val),start=test[0][0],end=test[-1][0],
                         **measure(p,ye),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,holdoutLeagues=holdout_leagues,ablations=ablations,
-                        models=[dict(name=n,train=len(w),trainStart=w[0][0],**measure(predict(m,xe,t),ye)) for _,n,m,t,w in candidates])
+                        calibration=calibration.method,calibratedLeagues=sorted(calibration.offsets),
+                        incumbent=dict(name=incumbent_name,**measure(incumbent_calibration.predict(
+                            incumbent_model.predict_proba(xe),league_ids),ye)),
+                        models=[dict(name=n,train=len(train),trainStart=train[0][0],
+                                     **measure(c.predict(m.predict_proba(xe),league_ids),ye))
+                                for n,(_,m,c) in baselines.items()])
         median=np.median(unpack(chosen_train)[0],axis=0)
         eligible=[m for m in matches if m['ready']]
         if eligible:
-            probabilities=predict(model,np.array([m['x'] for m in eligible]),temp)
+            probabilities=calibration.predict(model.predict_proba([m['x'] for m in eligible]),
+                                                np.array([m['league'] for m in eligible]))
             for m,probs in zip(eligible,probabilities):
-                active_model,active_temp,active_median=model,temp,median
+                active_median=median
                 feature_names=FEATURES
                 x=np.array(m['x'])
                 if player_fit and m['playerX'] is not None:
@@ -347,7 +359,8 @@ def build():
                     m['playersUsed']=True
                 x_alt=np.repeat(x[None,:],len(x),axis=0)
                 np.fill_diagonal(x_alt,active_median)
-                alt=predict(active_model,x_alt,active_temp)
+                alt=(predict(active_model,x_alt,active_temp) if m['playersUsed'] else
+                     calibration.predict(model.predict_proba(x_alt),np.repeat(m['league'],len(x))))
                 excluded=2 if probs[2]<=probs[0] else 0
                 m['market']='1X' if excluded==2 else 'X2'
                 m['prob']=(1-probs[excluded]).item()
@@ -360,7 +373,7 @@ def build():
         m.pop('x')
         m.pop('playerX')
     national_leagues,national_matches,national_evaluation,national_scores=predict_internationals(
-        TODAY,LISBON,PICK_MINIMUM,summary,predict,measure,standings)
+        TODAY,LISBON,PICK_MINIMUM,summary,measure,standings)
     leagues.extend(national_leagues)
     matches.extend(national_matches)
     snapshot=dict(internationalEvaluation=national_evaluation,updated=timestamp,day=TODAY.isoformat(),source=BASE,pickMinimum=PICK_MINIMUM,leagues=leagues,matches=matches,evaluation=evaluation)

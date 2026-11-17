@@ -58,3 +58,18 @@ class QualificationTest(TestCase):
         np.testing.assert_allclose(adjust_qualification(probs, ['qualified','open']), [.57,.265,.165])
         np.testing.assert_allclose(adjust_qualification(probs, ['qualified','qualified']), [.57,.2875,.1425])
         np.testing.assert_allclose(adjust_qualification(probs, ['open','open']), probs)
+
+
+class CalibrationTest(TestCase):
+    def test_competition_offsets_keep_coherent_outcomes_and_fallback(self):
+        from model_benchmarks import ProbabilityCalibration
+
+        forecasts = np.tile([.4,.3,.3], (200,1))
+        codes = np.array(['home-heavy']*100+['away-heavy']*100)
+        actual = np.array([0]*75+[1]*15+[2]*10+[0]*10+[1]*15+[2]*75)
+        calibration = ProbabilityCalibration('competition').fit(forecasts,actual,codes)
+        sample = np.tile([.4,.3,.3], (3,1))
+        adjusted = calibration.predict(sample,np.array(['home-heavy','away-heavy','unseen']))
+        np.testing.assert_allclose(adjusted.sum(axis=1), 1)
+        self.assertGreater(adjusted[0,0], adjusted[2,0])
+        self.assertGreater(adjusted[1,2], adjusted[2,2])
