@@ -475,7 +475,7 @@ async function historyPage() {
   content.textContent = 'A carregar o histórico…';
   main.append(content);
   try {
-    historyRequest ??= fetch('history.json', { cache: 'no-cache' }).then(response => {
+    historyRequest ??= fetch('history.json?refresh=' + Date.now(), { cache: 'no-store' }).then(response => {
       if (!response.ok) throw Error('History unavailable');
       return response.json();
     }).catch(error => { historyRequest = null; throw error; });
@@ -491,3 +491,56 @@ function route(){
   ({'#predictions':predictions,'#leagues':leagues,'#performance':performance,'#historico':historyPage})[page]();
 }
 fetch('snapshot.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw Error('Snapshot unavailable');return r.json();}).then(x=>{data=x;route();window.addEventListener('hashchange',route);}).catch(()=>{main.textContent='The forecast snapshot could not be loaded. Refresh to try again.';});
+
+
+const REFRESH_INTERVAL = 5 * 60 * 1000;
+let refreshing = false;
+let lastRefreshAttempt = 0;
+async function refreshPublishedData() {
+  if (document.hidden || refreshing || Date.now() - lastRefreshAttempt < 60000) return;
+  refreshing = true;
+  lastRefreshAttempt = Date.now();
+  try {
+    const [snapshotResponse, historyResponse] = await Promise.all([
+      fetch('snapshot.json?refresh=' + Date.now(), { cache: 'no-store' }),
+      fetch('history.json?refresh=' + Date.now(), { cache: 'no-store' }),
+    ]);
+    if (!snapshotResponse.ok || !historyResponse.ok) return;
+    const [snapshot, history] = await Promise.all([snapshotResponse.json(), historyResponse.json()]);
+    if (!Array.isArray(snapshot.matches) || !Array.isArray(history.picks)) return;
+    const previousHistory = historyRequest ? await historyRequest.catch(() => null) : null;
+    const changed = snapshot.updated !== data?.updated || history.updated !== previousHistory?.updated;
+    if (changed) {
+      const controls = [...main.querySelectorAll('.history-controls select')].map(select => select.value);
+      const expanded = new Set([...main.querySelectorAll('.fixture[open]')].map(fixture => fixture.querySelector('.teams').textContent));
+      const scrollPosition = window.scrollY;
+      data = snapshot;
+      historyRequest = Promise.resolve(history);
+      route();
+      // History renders after its cached Promise resolves.
+      await Promise.resolve();
+      const selects = [...main.querySelectorAll('.history-controls select')];
+      selects.forEach((select, index) => {
+        if ([...select.options].some(option => option.value === controls[index])) {
+          select.value = controls[index];
+          select.dispatchEvent(new Event('change'));
+        }
+      });
+      if (location.hash !== '#historico') {
+        main.querySelectorAll('.fixture').forEach(fixture => {
+          if (expanded.has(fixture.querySelector('.teams').textContent)) fixture.open = true;
+        });
+      }
+      window.scrollTo(0, scrollPosition);
+    }
+  } catch {
+    // Keep the last successful snapshot available and retry on the next interval.
+  } finally {
+    refreshing = false;
+  }
+}
+setInterval(refreshPublishedData, REFRESH_INTERVAL);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshPublishedData();
+});
+window.addEventListener('focus', refreshPublishedData);

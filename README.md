@@ -31,7 +31,7 @@ The current free feeds lack verified player-level data. The optional `data/playe
 
 ## Scheduled hosting
 
-The bundled GitHub Actions workflow is configured for daily refresh at 00:00 Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache and the deployed archive. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
+The bundled GitHub Actions workflow is configured for hourly refresh at minute 17 in Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache and the deployed archive. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
 
 ## Scope of this version
 
@@ -52,3 +52,5 @@ League cards show a compact standings preview, then expand to all available team
 Football-Data.co.uk's additional score files cover Denmark, Poland, Sweden, Switzerland and MLS. OpenFootball text archives provide historical results for Liga Portugal 2, Hungary and the league phases of the UEFA Champions League, Europa League and Conference League. These supplementary sources are scores-only in the app. The three UEFA cups link to their official fixture pages while an upcoming fixture feed is unavailable.
 
 Each match's expanded analysis shows its league's held-out sample size and selected hit rate. Rates below 70% carry a red warning. The hit rate measures historical accuracy across evaluated picks and is separate from a match's forecast probability.
+
+The open dashboard checks for new published forecasts and history every five minutes and when returning to the tab. Provider results become visible after the next successful build. GitHub scheduled runs may start late. Failed browser refreshes retain the last successful data.
