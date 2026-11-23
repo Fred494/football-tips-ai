@@ -3,7 +3,7 @@
 import json
 import os
 from urllib.request import urlopen
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 LISBON = ZoneInfo('Europe/Lisbon')
@@ -58,6 +58,32 @@ def before_kickoff(match, publication):
 
 def update_history(history, snapshot, scores):
     picks = {pick['id']: dict(pick) for pick in history['picks']}
+    # Correct provisional fixture dates using an unambiguous same-season match.
+    candidates=set(scores)|{m['id'] for m in snapshot['matches']}
+    fixture_details={m['id']:m for m in snapshot['matches']}
+    for pick in picks.values():
+        original=pick.get('fixtureId',pick['id'])
+        if original in candidates:
+            continue
+        parts=original.split('|')
+        if len(parts)!=5:
+            continue
+        code,season,day,home,away=parts
+        matching=[]
+        for candidate in candidates:
+            fields=candidate.split('|')
+            if len(fields)!=5:
+                continue
+            if (fields[:2]==[code,season] and fields[3:]==[home,away]
+                    and abs((date.fromisoformat(day)-date.fromisoformat(fields[2])).days)<=7):
+                matching.append(candidate)
+        if len(matching)==1:
+            replacement=matching[0]
+            pick.setdefault('originalDay',pick['day'])
+            pick['fixtureId']=replacement
+            pick['day']=replacement.split('|')[2]
+            if replacement in fixture_details:
+                pick['kickoff']=fixture_details[replacement].get('kickoff')
     archived = {(pick.get('fixtureId', pick['id']), pick['market']) for pick in picks.values()}
     leagues = {league['code']: league['name'] for league in snapshot['leagues']}
 

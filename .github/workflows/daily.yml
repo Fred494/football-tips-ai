@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '17 * * * *'
+    - cron: '17,47 * * * *'
       timezone: Europe/Lisbon
 permissions:
   actions: read
@@ -27,7 +27,11 @@ jobs:
           python-version: '3.12'
       - uses: actions/cache@v4
         with:
-          path: data/forecasts.sqlite
+          path: |
+            data/forecasts.sqlite
+            data/scoreboard.json
+            data/international-fixtures.json
+            data/afcon-fixtures.json
           key: forecast-history-${{ github.run_id }}
           restore-keys: forecast-history-
       - run: pip install -r requirements.txt
@@ -36,6 +40,7 @@ jobs:
       - run: python european_data.py
       - run: python international_data.py
       - run: python club_tables.py
+      - run: python scoreboard_data.py
       - run: python build.py
       - uses: actions/upload-pages-artifact@v3
         with:

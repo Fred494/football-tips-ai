@@ -31,7 +31,7 @@ The current free feeds lack verified player-level data. The optional `data/playe
 
 ## Scheduled hosting
 
-The bundled GitHub Actions workflow is configured for hourly refresh at minute 17 in Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache and the deployed archive. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
+The bundled GitHub Actions workflow is configured for refresh every 30 minutes at minutes 17 and 47 in Europe/Lisbon. To activate on a GitHub repository, copy the project into the default branch, enable Actions, set Settings → Pages → Source to GitHub Actions, and manually run **Daily football forecasts** once. Confirm the deployed Pages URL and review the next scheduled run in Actions. The workflow uses standard hosted runners and preserves SQLite history through Actions cache and the deployed archive. The Sites deployment is an initial snapshot. This workflow refreshes the GitHub Pages deployment after setup.
 
 ## Scope of this version
 
@@ -57,8 +57,16 @@ The open dashboard checks for new published forecasts and history every five min
 
 ## European club forecasts
 
-The hourly build refreshes the Champions League, Europa League and Conference League league-phase fixtures and regulation-time scores from UEFA's official season publications through `european_data.py`. Successful snapshots are committed as recovery copies. When UEFA blocks access, the adapter verifies the completed and next-seven-day schedule against ESPN scoreboards, requiring exact home/away identity matches for every scheduled game on each checked date. It updates regulation-time final scores and kickoff times after matching. Failed verification retains the previous snapshot and its original verification time.
+The build refreshes the Champions League, Europa League and Conference League league-phase fixtures and regulation-time scores from UEFA's official season publications through `european_data.py`. Successful snapshots are committed as recovery copies. When UEFA blocks access, the adapter verifies the completed and next-seven-day schedule against ESPN scoreboards, requiring exact home/away identity matches for every scheduled game on each checked date. It updates regulation-time final scores and kickoff times after matching. Failed verification retains the previous snapshot and its original verification time.
 
 European forecasts combine up to ten preceding domestic and European matches for recent form, opponent strength, Elo and home/away performance. Season points and position refer to the European competition being predicted. Domestic forecasts retain their own league context. Provider names are aligned using explicit aliases and normalized club names. Training features are computed before each matchday, and same-day results are excluded. A European forecast requires ten prior covered matches for each club and three current-season European matches. Fixtures with insufficient data remain visible under Other games of the day. Top Picks retain the 85% threshold and the existing rare home exception.
 
 Fixture refresh timestamps, score availability and evaluation sample sizes are displayed in the dashboard. The historical evaluation still pools club models and includes European observations when sufficiently covered. Teams outside the available domestic leagues can have smaller usable samples.
+
+## Frequent calendar and result refresh
+
+The workflow runs at minutes 17 and 47 each hour. Each run refreshes calendars, recent final scores, training and forecasts, the original published pick archive, and standings, then publishes all dashboard files together. GitHub's scheduler may delay a run. The open dashboard checks for publication changes every five minutes and when returning to the tab.
+
+`scoreboard_data.py` supplements domestic sources with ESPN near-term scoreboards. It matches provider identities to existing fixtures before settlement, accepts final scores only when the provider reports a completed match, and retains previously valid scores after partial failures. It also reconciles the verified Nations League and AFCON qualifier calendars with their scoreboards. Confirmed same-day results can settle Histórico immediately while training continues to use results from previous matchdays. Calendar check times and last verified result dates remain distinct.
+
+When a provisional fixture date changes by up to seven days, a unique same-competition, same-season home/away pairing updates its archive settlement reference and actual match date. The original publication time and probability stay attached to the archived pick.

@@ -116,6 +116,9 @@ function predictions(){
   const start=today;
   const dates=Array.from({length:4},(_,i)=>offset(start,i));
   main.innerHTML=hero('Double chance · 1X / X2','Top match picks','Explore the strongest model predictions for today and the next three days.')+
+    '<p class="history-updated">Last update · '+esc(new Intl.DateTimeFormat('en-GB',{
+      dateStyle:'short',timeStyle:'short',timeZone:'Europe/Lisbon'
+    }).format(new Date(data.updated)))+' (Lisbon) · Scheduled every 30 minutes</p>'+
     (data.day!==today?'<p class="notice">Forecast snapshot from '+esc(data.day)+'. A newer refresh is unavailable.</p>':'')+
     '<div class="date-grid" aria-label="Match dates">'+dates.map(day=>{
       const active=dateSelected(day,start);

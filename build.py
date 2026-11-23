@@ -115,6 +115,32 @@ def read_data():
                             fixturesChecked=(json.loads((ROOT/'data'/f'{active}_{code}.json').read_text()).get('checkedAt')
                                              if code in EUROPEAN_SOURCES and (ROOT/'data'/f'{active}_{code}.json').exists()
                                              else refresh.get('checkedAt') if refresh.get('files',{}).get(f'{active}/{code}.json')=='OK' else None)))
+    scoreboard_path=ROOT/'data'/'scoreboard.json'
+    if scoreboard_path.exists():
+        scoreboard=json.loads(scoreboard_path.read_text())
+        for league in leagues:
+            entry=scoreboard.get('leagues',{}).get(league['code'])
+            if not entry:
+                continue
+            for season in {m['season'] for m in entry['matches']}:
+                existing={m['id']:m for m in league['seasons'].get(season,[])}
+                for m in entry['matches']:
+                    if m['season']==season:
+                        existing={identity:old for identity,old in existing.items()
+                                  if identity==m['id']
+                                  or old['home']!=m['home'] or old['away']!=m['away']
+                                  or abs((date.fromisoformat(old['day'])-date.fromisoformat(m['day'])).days)>7}
+                        original=existing.get(m['id'],{})
+                        existing[m['id']]=dict(original,**m)
+                        if original.get('score') is not None and m['score'] is None:
+                            existing[m['id']]['score']=original['score']
+                league['seasons'][season]=sorted(existing.values(),key=lambda m:(m['day'],m['id']))
+            league['seasons']=dict(sorted(league['seasons'].items()))
+            recent_checks=[stamp for day,stamp in entry.get('checkedDays',{}).items()
+                           if TODAY.isoformat()<=day<=(TODAY+timedelta(days=3)).isoformat()]
+            if len(recent_checks)==4:
+                league['fixturesChecked']=min(recent_checks)
+            league['scoreSource']+=' / ESPN scoreboard'
     return leagues
 
 def standings(current):
@@ -292,7 +318,7 @@ def build():
     leagues=read_data()
     european_context(leagues)
     final_scores={m['id']:m['score'] for l in leagues for season in l['seasons'].values()
-                  for m in season if m['score'] is not None and m['day']<TODAY.isoformat()}
+                  for m in season if m['score'] is not None and m['day']<=TODAY.isoformat()}
     records,matches=process(leagues,load_players(ROOT))
     evaluation=None
     if len(records)>=300:
