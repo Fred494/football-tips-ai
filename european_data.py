@@ -4,7 +4,8 @@ import json
 import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -35,11 +36,26 @@ ALIASES = {
     'Olympiacos': 'Olympiacos FC', 'Panathinaikos': 'Panathinaikos FC',
 }
 
+ALIASES.update({
+    'Atlético Madrid':'Club Atlético de Madrid', 'Internazionale':'FC Internazionale Milano',
+    'Bayern Munich':'FC Bayern München', 'Slavia Prague':'Slavia Praha',
+    'Celta Vigo':'RC Celta de Vigo', 'Dinamo Zagreb':'GNK Dinamo',
+    'Bayer Leverkusen':'Bayer 04 Leverkusen', 'RB Salzburg':'Salzburg', 'LASK Linz':'LASK',
+    "Hapoel Be'er":'Hapoel Beer-Sheva', 'Sparta Prague':'Sparta Praha',
+    'NK Celje':'Celje', 'Sabah FK':'Sabah', 'Viking FK':'Viking',
+    'CSU Craiova':'Universitatea Craiova', 'Iberia 1999':'Iberia Tbilisi',
+    'AGF':'Aarhus', 'SK Brann':'Brann', "Inter D'Escaldes":'Inter Escaldes',
+    'København':'Copenhagen', 'F.C. København':'Copenhagen', 'KAA Gent':'Gent',
+    'Red Star Belgrade':'Crvena Zvezda', 'FC Twente':"FC Twente '65",
+})
+ESPN = {'uefa.cl':'uefa.champions','uefa.el':'uefa.europa','uefa.ecl':'uefa.europa.conf'}
+
 def clean(value):
     return ' '.join(html.unescape(re.sub('<[^>]+>', ' ', value)).replace('\ufeff', '').split())
 
 def club_key(team):
     team = ALIASES.get(clean(team), clean(team))
+    team = team.replace('ø','o').replace('Ø','O').replace('ł','l').replace('Ł','L')
     team = unicodedata.normalize('NFKD', team).encode('ascii', 'ignore').decode().lower()
     team = re.sub(r'\b(fc|afc|cf|ac|sc|sk|jk|kv|bc|1907|1909|1913)\b', ' ', team)
     return re.sub(r'[^a-z0-9]', '', team)
@@ -80,20 +96,73 @@ def parse_schedule(page, code):
         raise ValueError(f'{code}: incomplete official schedule ({len(rows)})')
     return sorted(rows.values(),key=lambda r:(r['date'],r['team1']))
 
+def refresh_espn(code, previous):
+    """Match ESPN events to the verified schedule before replacing any scores."""
+    rows=[dict(row) for row in previous['matches']]
+    today=datetime.now(timezone.utc).date()
+    end=(today+timedelta(days=7)).isoformat()
+    days=sorted({row['date'] for row in rows if row['date']<=end})
+    if not days:
+        raise ValueError('No scheduled dates to verify')
+
+    def fetch_day(day):
+        url=f"https://site.api.espn.com/apis/site/v2/sports/soccer/{ESPN[code]}/scoreboard?dates={day.replace('-','')}"
+        with urlopen(url,timeout=15) as response:
+            payload=json.load(response)
+        expected=[row for row in rows if row['date']==day]
+        matched=[]
+        for event in payload.get('events',[]):
+            competition=event.get('competitions',[{}])[0]
+            teams={team['homeAway']:team for team in competition.get('competitors',[])}
+            if not all(side in teams for side in ('home','away')):
+                continue
+            def keys(side):
+                team=teams[side]['team']
+                return {club_key(team[field]) for field in ('displayName','shortDisplayName','name') if team.get(field)}
+            candidates=[row for row in expected if club_key(row['team1']) in keys('home')
+                        and club_key(row['team2']) in keys('away')]
+            if len(candidates)!=1:
+                continue
+            row=candidates[0]
+            stamp=datetime.fromisoformat(event['date'].replace('Z','+00:00')).astimezone(ZoneInfo('Europe/Berlin'))
+            row['date']=stamp.date().isoformat()
+            row['kickoffCET']=stamp.strftime('%H:%M')
+            status=competition.get('status',event.get('status',{})).get('type',{})
+            if status.get('completed') and status.get('state')=='post':
+                score=[int(teams[side]['score']) for side in ('home','away')]
+                if min(score)<0:
+                    raise ValueError('Invalid final score')
+                row['score']={'ft':score}
+            row['resultSource']=url
+            matched.append(id(row))
+        if len(set(matched))!=len(expected):
+            missing=[row['team1']+' – '+row['team2'] for row in expected if id(row) not in matched]
+            raise ValueError(f"{code} {day}: unmatched schedule entries {missing}")
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(fetch_day,days))
+    return dict(previous,matches=rows,checkedAt=datetime.now(timezone.utc).isoformat(),
+                verificationSource='ESPN scoreboard matched to the official UEFA schedule')
+
+
 def refresh():
     def fetch(item):
         code, source = item
+        path=ROOT/'data'/f'2026-27_{code}.json'
         try:
             with urlopen(source,timeout=20) as response:
                 rows=parse_schedule(response.read().decode('utf-8'),code)
             payload=dict(matches=rows,checkedAt=datetime.now(timezone.utc).isoformat(),source=source)
-            path=ROOT/'data'/f'2026-27_{code}.json'
-            temp=path.with_suffix('.tmp')
-            temp.write_text(json.dumps(payload,ensure_ascii=False,separators=(',',':'))+'\n')
-            temp.replace(path)
-            return code,len(rows)
         except (OSError,ValueError) as error:
-            return code,str(error)
+            if not path.exists():
+                return code,str(error)
+            try:
+                payload=refresh_espn(code,json.loads(path.read_text()))
+            except (OSError,ValueError,KeyError,TypeError) as fallback_error:
+                return code,f'UEFA: {error}; ESPN: {fallback_error}'
+        temp=path.with_suffix('.tmp')
+        temp.write_text(json.dumps(payload,ensure_ascii=False,separators=(',',':'))+'\n')
+        temp.replace(path)
+        return code,len(payload['matches'])
     with ThreadPoolExecutor(max_workers=3) as pool:
         print('UEFA club schedules:',list(pool.map(fetch,SOURCES.items())))
 

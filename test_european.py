@@ -40,3 +40,28 @@ class EuropeanTests(unittest.TestCase):
         self.assertEqual(stats[2]['ppg'],3.)
         self.assertEqual(stats[3]['ppg'],0.)
         self.assertEqual(stats[0]['n'],0)
+
+    def test_scoreboard_fallback_requires_matching_home_and_away(self):
+        import io
+        import json
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        from european_data import refresh_espn
+
+        day=datetime.now(timezone.utc).date().isoformat()
+        previous=dict(matches=[dict(date=day,team1='Porto',team2='Arsenal',score=None,
+                                    kickoffCET='21:00')])
+        event=dict(date=day+'T20:00Z',competitions=[dict(
+            status=dict(type=dict(completed=True,state='post')),
+            competitors=[
+                dict(homeAway='home',score='2',team=dict(displayName='FC Porto')),
+                dict(homeAway='away',score='1',team=dict(displayName='Arsenal FC'))])])
+        payload=dict(events=[event])
+        with patch('european_data.urlopen',side_effect=lambda *a,**k:io.StringIO(json.dumps(payload))):
+            updated=refresh_espn('uefa.cl',previous)
+        self.assertEqual(updated['matches'][0]['score'],{'ft':[2,1]})
+        self.assertIsNone(previous['matches'][0]['score'])
+        payload['events'][0]['competitions'][0]['competitors'][0]['team']['displayName']='Unrelated club'
+        with patch('european_data.urlopen',side_effect=lambda *a,**k:io.StringIO(json.dumps(payload))):
+            with self.assertRaises(ValueError):
+                refresh_espn('uefa.cl',previous)

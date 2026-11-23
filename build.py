@@ -111,7 +111,7 @@ def read_data():
                 enriched.append(season)
         leagues.append(dict(code=code,country=country,name=name,seasons=dict(sorted(seasons.items())),
                             resultsFeed=enriched,priority=code in PRIORITY,
-                            scoreSource='UEFA official league-phase schedule' if code in EUROPEAN_SOURCES else 'OpenFootball archive' if code in ('pt.2','hu.1') else 'Football-Data.co.uk',
+                            scoreSource='UEFA schedule / matched ESPN results' if code in EUROPEAN_SOURCES else 'OpenFootball archive' if code in ('pt.2','hu.1') else 'Football-Data.co.uk',
                             fixturesChecked=(json.loads((ROOT/'data'/f'{active}_{code}.json').read_text()).get('checkedAt')
                                              if code in EUROPEAN_SOURCES and (ROOT/'data'/f'{active}_{code}.json').exists()
                                              else refresh.get('checkedAt') if refresh.get('files',{}).get(f'{active}/{code}.json')=='OK' else None)))
