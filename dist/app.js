@@ -14,8 +14,8 @@ const result=(m,t)=>{const [h,a]=m.score;const d=(h-a)*(t===m.home?1:-1);return 
 function table(headers,rows){return '<div class="table-scroll"><table><thead><tr>'+headers.map(x=>'<th scope="col">'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';}
 const row=(items,highlight=false)=>'<tr'+(highlight?' class="highlight"':'')+'>'+items.map(x=>'<td>'+esc(x)+'</td>').join('')+'</tr>';
 const number=x=>x==null?'—':x;
-function formBox(matches,t,stats,long,international){
-  const context=international?'International matches':'League matches';
+function formBox(matches,t,stats,long,international,scope){
+  const context=scope||(international?'International matches':'League matches');
   return '<section class="box"><h3>'+esc(t)+' · Last ten</h3><p>'+context+' · '+stats.n+' available</p>'+
     table(['Date','Opponent','Venue','Score (H–A)','Result'],matches.map(m=>row([m.day,t===m.home?m.away:m.home,t===m.home?'Home':'Away',m.score.join('–'),result(m,t)])).join(''))+
     '<p>'+stats.w+'W / '+stats.d+'D / '+stats.l+'L · Goals '+stats.gf+'–'+stats.ga+' · '+stats.pts+' pts · '+number(stats.ppg)+' PPG</p><small>Last '+long.n+' matches · '+long.pts+' points</small></section>';
@@ -29,14 +29,14 @@ function card(m){
     '<div class="teams"><span>'+crest(m.home,m.international)+'<strong>'+esc(m.home)+'</strong><small>'+rank(m.home)+'</small></span><span>'+crest(m.away,m.international)+'<strong>'+esc(m.away)+'</strong><small>'+rank(m.away)+'</small></span></div>'+
     '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+(m.pick==='exception'?'<small class="exception-label">Home-form exception</small>':'')+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
     '<section class="box full"><h3>Why this prediction?</h3>'+explanation+(m.why?'<small>Each factor is varied individually. Effects may overlap and are approximate.</small>':'')+'</section>'+
-    (m.international&&m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
+    (m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
     qualificationBox(m)+
     leaguePerformanceBox(m)+
-    formBox(m.form[0],m.home,hr,m.long[0],m.international)+formBox(m.form[1],m.away,ar,m.long[1],m.international)+
+    formBox(m.form[0],m.home,hr,m.long[0],m.international,m.formScope)+formBox(m.form[1],m.away,ar,m.long[1],m.international,m.formScope)+
     '<section class="box"><h3>Team performance</h3>'+table(['Metric',m.home,m.away],comparison.map(x=>row(x)).join(''))+'</section>'+
     '<section class="box"><h3>Probability breakdown</h3>'+(ranked(m)?table(['Outcome','Estimate'],['Home win','Draw','Away win','1X · Home or draw','X2 · Draw or away'].map((k,i)=>row([k,pct([...m.breakdown,1-m.breakdown[2],1-m.breakdown[0]][i])])).join('')):'<p>No estimate for this fixture.</p>')+'</section>'+
     '<section class="box full"><h3>Reconstructed standings</h3><p>'+esc(m.season)+' · Before '+esc(data.day)+' · Ordered by points, goal difference and goals scored. Official deductions and phase rules may differ.</p>'+table(['#','Team','P','W','D','L','GF','GA','GD','Pts','PPG'],m.table.map((r,i)=>row([i+1,r.team,r.n,r.w,r.d,r.l,r.gf,r.ga,r.gd,r.pts,r.ppg],[m.home,m.away].includes(r.team))).join(''))+'</section>'+
-    (m.h2h.length?'<section class="box full"><h3>Recent league meetings</h3>'+table(['Date','Home','Score','Away'],m.h2h.map(x=>row([x.day,x.home,x.score.join('–'),x.away])).join(''))+'</section>':'')+'</div></details>';
+    (m.h2h.length?'<section class="box full"><h3>Recent meetings</h3>'+table(['Date','Home','Score','Away'],m.h2h.map(x=>row([x.day,x.home,x.score.join('–'),x.away])).join(''))+'</section>':'')+'</div></details>';
 }
 function playerBox(m){
   const entries=(m.players||[]).filter(Boolean);

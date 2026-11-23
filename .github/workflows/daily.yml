@@ -33,6 +33,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python fetch_data.py
       - run: python results_feed.py
+      - run: python european_data.py
       - run: python international_data.py
       - run: python club_tables.py
       - run: python build.py

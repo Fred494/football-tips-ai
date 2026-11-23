@@ -54,3 +54,11 @@ Football-Data.co.uk's additional score files cover Denmark, Poland, Sweden, Swit
 Each match's expanded analysis shows its league's held-out sample size and selected hit rate. Rates below 70% carry a red warning. The hit rate measures historical accuracy across evaluated picks and is separate from a match's forecast probability.
 
 The open dashboard checks for new published forecasts and history every five minutes and when returning to the tab. Provider results become visible after the next successful build. GitHub scheduled runs may start late. Failed browser refreshes retain the last successful data.
+
+## European club forecasts
+
+The hourly build refreshes the Champions League, Europa League and Conference League league-phase fixtures and regulation-time scores from UEFA's official season publications through `european_data.py`. Successful snapshots are committed as recovery copies. Failed refreshes retain the last snapshot and its original verification time.
+
+European forecasts combine up to ten preceding domestic and European matches for recent form, opponent strength, Elo and home/away performance. Season points and position refer to the European competition being predicted. Domestic forecasts retain their own league context. Provider names are aligned using explicit aliases and normalized club names. Training features are computed before each matchday, and same-day results are excluded. A European forecast requires ten prior covered matches for each club and three current-season European matches. Fixtures with insufficient data remain visible under Other games of the day. Top Picks retain the 85% threshold and the existing rare home exception.
+
+Fixture refresh timestamps, score availability and evaluation sample sizes are displayed in the dashboard. The historical evaluation still pools club models and includes European observations when sufficiently covered. Teams outside the available domestic leagues can have smaller usable samples.

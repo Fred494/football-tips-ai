@@ -13,6 +13,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from results_feed import merge
+from european_data import SOURCES as EUROPEAN_SOURCES, club_key
 from history import load_history, load_published_history, merge_picks, save_history, update_history
 from international_model import predict_internationals
 from model_benchmarks import (EloGoals, FORM_WINDOW, ModelBlend, market_metrics, recent_strength,
@@ -66,7 +67,10 @@ def read_data():
             if season not in allowed:
                 continue
             rows = {}
-            for match in json.loads(path.read_text())['matches']:
+            payload=json.loads(path.read_text())
+            if code in EUROPEAN_SOURCES and season == active and payload.get('checkedAt'):
+                refresh.setdefault('files',{})[f'{active}/{code}.json']='OK'
+            for match in payload['matches']:
                 day, home, away = (match.get(k) for k in ('date','team1','team2'))
                 try:
                     date.fromisoformat(day)
@@ -87,9 +91,13 @@ def read_data():
                         day = local.astimezone(LISBON).date().isoformat()
                     except ValueError:
                         pass
+                if match.get('kickoffCET'):
+                    local=datetime.fromisoformat(f"{day}T{match['kickoffCET']}").replace(tzinfo=ZoneInfo('Europe/Berlin'))
+                    kickoff=local.astimezone(LISBON).strftime('%H:%M')
+                    day=local.astimezone(LISBON).date().isoformat()
                 key = (day,home,away)
                 rows[key] = dict(id='|'.join((code,season,*key)), day=day, home=home, away=away,
-                                 score=score, kickoff=kickoff, season=season, league=code, round=match.get('round'))
+                                 score=score, kickoff=kickoff, season=season, league=code, round=match.get('round'), source=match.get('source'))
             seasons[season] = sorted(rows.values(),key=lambda x:x['day'])
         enriched=[]
         for path in (ROOT/'data').glob(f'csv_*_{code}.json'):
@@ -103,20 +111,24 @@ def read_data():
                 enriched.append(season)
         leagues.append(dict(code=code,country=country,name=name,seasons=dict(sorted(seasons.items())),
                             resultsFeed=enriched,priority=code in PRIORITY,
-                            scoreSource='OpenFootball archive' if code in ('pt.2','hu.1','uefa.cl','uefa.el','uefa.ecl') else 'Football-Data.co.uk',
-                            fixturesChecked=refresh.get('checkedAt') if refresh.get('files',{}).get(f'{active}/{code}.json')=='OK' else None))
+                            scoreSource='UEFA official league-phase schedule' if code in EUROPEAN_SOURCES else 'OpenFootball archive' if code in ('pt.2','hu.1') else 'Football-Data.co.uk',
+                            fixturesChecked=(json.loads((ROOT/'data'/f'{active}_{code}.json').read_text()).get('checkedAt')
+                                             if code in EUROPEAN_SOURCES and (ROOT/'data'/f'{active}_{code}.json').exists()
+                                             else refresh.get('checkedAt') if refresh.get('files',{}).get(f'{active}/{code}.json')=='OK' else None)))
     return leagues
 
 def standings(current):
     table=[dict(team=t,**summary(g,t),form=['W' if m['score'][m['away']==t]>m['score'][m['home']==t] else 'L' if m['score'][m['away']==t]<m['score'][m['home']==t] else 'D' for m in g[-5:]]) for t,g in current.items() if g]
     return sorted(table,key=lambda r:(-r['pts'],-r['gd'],-r['gf'],r['team']))
 
-def features(match, recent, current, elo, table, opponent_history, window=FORM_WINDOW):
+def features(match, recent, current, elo, table, opponent_history, window=FORM_WINDOW, all_venues=False):
     h,a=match['home'],match['away']
     hs,as_=summary(current[h],h),summary(current[a],a)
     hr,ar=[summary(recent[t][-window:],t) for t in (h,a)]
-    hv=summary([m for m in current[h] if m['home']==h],h)
-    av=summary([m for m in current[a] if m['away']==a],a)
+    home_venue=recent[h][-FORM_WINDOW:] if all_venues else current[h]
+    away_venue=recent[a][-FORM_WINDOW:] if all_venues else current[a]
+    hv=summary([m for m in home_venue if m['home']==h],h)
+    av=summary([m for m in away_venue if m['away']==a],a)
     diff=lambda x,y,k:(x[k] if x[k] is not None else 1.35)-(y[k] if y[k] is not None else 1.35)
     gd=lambda x:x['gd']/max(1,x['n'])
     position={r['team']:i+1 for i,r in enumerate(table)}
@@ -132,8 +144,38 @@ def features(match, recent, current, elo, table, opponent_history, window=FORM_W
             (hr['w']+hr['d'])/max(1,hr['n'])-(ar['w']+ar['d'])/max(1,ar['n']),
             rest(h)-rest(a), hr['gpg'] or 0, hr['gapg'] or 0, ar['gpg'] or 0, ar['gapg'] or 0], [hs,as_,hv,av,hr,ar]
 
+def european_context(leagues):
+    names={}
+    for league in leagues:
+        if league['code'] not in EUROPEAN_SOURCES:
+            for rows in league['seasons'].values():
+                for match in rows:
+                    for side in ('home','away'):
+                        names.setdefault(club_key(match[side]),match[side])
+    for league in leagues:
+        if league['code'] in EUROPEAN_SOURCES:
+            for rows in league['seasons'].values():
+                for match in rows:
+                    for side in ('home','away'):
+                        names.setdefault(club_key(match[side]),match[side])
+                        match[side]=names[club_key(match[side])]
+                    match['id']='|'.join((match['league'],match['season'],match['day'],match['home'],match['away']))
+    context=defaultdict(dict)
+    for league in leagues:
+        for season,rows in league['seasons'].items():
+            for match in rows:
+                if match['score'] is None:
+                    continue
+                normalized=dict(match,home=names.get(club_key(match['home']),match['home']),
+                                away=names.get(club_key(match['away']),match['away']))
+                key=(normalized['day'],normalized['home'],normalized['away'])
+                context[season][key]=normalized
+    return context
+
+
 def process(leagues, players):
     training, upcoming = [], []
+    context=european_context(leagues)
     now = TODAY.isoformat()
     horizon = (TODAY+timedelta(days=30)).isoformat()
     for league in leagues:
@@ -144,24 +186,29 @@ def process(leagues, players):
         last_table=[]
         for season, rows in league['seasons'].items():
             all_rows.extend(rows)
+            if league['code'] in EUROPEAN_SOURCES:
+                others=[m for m in context.get(season,{}).values() if m['league']!=league['code']]
+                rows=rows+others
             current=defaultdict(list)
             for day in sorted({m['day'] for m in rows if m['day'] <= horizon}):
                 batch=[m for m in rows if m['day']==day]
                 table=standings(current)
                 prior_elo={t:elo[t] for m in batch for t in (m['home'],m['away'])}
                 for m in batch:
+                    if m['league']!=league['code']:
+                        continue
                     h,a=m['home'],m['away']
-                    x, stats=features(m,recent,current,elo,table,opponent_history)
+                    x, stats=features(m,recent,current,elo,table,opponent_history,all_venues=league["code"] in EUROPEAN_SOURCES)
                     ready=min(len(recent[h]),len(recent[a]))>=FORM_WINDOW and min(len(current[h]),len(current[a]))>=3
                     if day < now and m['score'] is not None and ready:
                         left,right=m['score']
                         player_x,_=for_match(players,m,date.fromisoformat(day),LISBON)
                         training.append((day,league['code'],x,0 if left>right else 1 if left==right else 2,player_x,m['id'],m['score'],home_exception(stats,table,h,a),
                                          stats[4]['ppg']-stats[5]['ppg'],
-                                         features(m,recent,current,elo,table,opponent_history,5)[0]))
+                                         features(m,recent,current,elo,table,opponent_history,5,all_venues=league["code"] in EUROPEAN_SOURCES)[0]))
                     if now <= day <= horizon and m['score'] is None:
                         player_x,player_details=for_match(players,m,TODAY,LISBON)
-                        upcoming.append(dict(**m, x=x, ready=ready, stats=stats,table=table,
+                        upcoming.append(dict(**m, formScope='Domestic and European matches' if league['code'] in EUROPEAN_SOURCES else 'League matches', x=x, ready=ready, stats=stats,table=table,
                                              playerX=player_x,players=player_details,playersUsed=False,
                                              form=[recent[t][-FORM_WINDOW:][::-1] for t in (h,a)],
                                              long=[summary(recent[t][-10:],t) for t in (h,a)],
@@ -179,7 +226,8 @@ def process(leagues, players):
                     opponent_history[h].append(prior_elo[a])
                     opponent_history[a].append(prior_elo[h])
                     for t in (h,a):
-                        current[t].append(m)
+                        if m['league']==league['code']:
+                            current[t].append(m)
                         recent[t].append(m)
             last_table=standings(current)
         league['table']=last_table
@@ -242,6 +290,7 @@ def competition_backtest(records):
 
 def build():
     leagues=read_data()
+    european_context(leagues)
     final_scores={m['id']:m['score'] for l in leagues for season in l['seasons'].values()
                   for m in season if m['score'] is not None and m['day']<TODAY.isoformat()}
     records,matches=process(leagues,load_players(ROOT))
