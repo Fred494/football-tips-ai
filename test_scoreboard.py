@@ -49,3 +49,9 @@ class ScoreboardTests(unittest.TestCase):
         payload['events'][0]['competitions'][0]['status']['period']=4
         rows=normalize_events(payload,'it.1','2026-27',self.known())
         self.assertIsNone(rows[0]['score'])
+
+    def test_a_different_known_opponent_is_not_inferred_as_an_alias(self):
+        known=self.known()+[dict(day='2026-11-15',home='AC Milan',away='Juventus FC')]
+        payload=self.payload(True,'post')
+        payload['events'][0]['competitions'][0]['competitors'][1]['team']['displayName']='Juventus'
+        self.assertEqual(normalize_events(payload,'it.1','2026-27',known),[])

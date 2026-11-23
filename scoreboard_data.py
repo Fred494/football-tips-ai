@@ -44,6 +44,7 @@ def normalize_events(payload, code, season, known):
     for match in known:
         for field in ('home','away'):
             names[key(match[field])].add(match[field])
+    canonical_names={team for choices in names.values() for team in choices}
     output=[]
     for event in payload.get('events',[]):
         competitions=event.get('competitions',[])
@@ -77,6 +78,9 @@ def normalize_events(payload, code, season, known):
                     m['home']==resolved['home'] or m['away']==resolved['away']]
         if len(candidates)==1:
             candidate=candidates[0]
+            if any(resolved[side]!=candidate[side] and resolved[side] in canonical_names
+                   for side in ('home','away')):
+                continue
             resolved={side:candidate[side] for side in ('home','away')}
         elif candidates and not any(all(m[side]==resolved[side] for side in ('home','away')) for m in candidates):
             continue
