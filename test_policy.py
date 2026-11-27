@@ -33,3 +33,15 @@ class PolicyTests(unittest.TestCase):
         archive={'2026':dict(available='2026-07-03',clubs=clubs,source='UEFA')}
         self.assertIsNone(coefficient_features('Home','Away','2026-07-03',archive))
         self.assertIsNotNone(coefficient_features('Home','Away','2026-07-04',archive))
+
+    def test_first_new_qualifying_publication_preserves_an_older_low_pick(self):
+        from history import update_history
+        old=dict(id='game',fixtureId='game',day='2026-11-28',home='Home',away='Away',league='test',
+                 market='1X',prob=.84,publishedAt='2026-11-26T12:00:00+00:00',status='pending',score=None)
+        match=dict(id='game',day='2026-11-28',home='Home',away='Away',league='test',
+                   market='1X',prob=.88,pick='standard')
+        snapshot=dict(updated='2026-11-27T12:00:00+00:00',pickMinimum=.875,leagues=[],matches=[match])
+        first=update_history({'picks':[old]},snapshot,{})
+        second=update_history(first,snapshot,{})
+        self.assertEqual(sorted(p['prob'] for p in second['picks']),[.84,.88])
+        self.assertEqual(len([p for p in second['picks'] if p['prob']>=.875]),1)

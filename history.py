@@ -85,12 +85,18 @@ def update_history(history, snapshot, scores):
             if replacement in fixture_details:
                 pick['kickoff']=fixture_details[replacement].get('kickoff')
     archived = {(pick.get('fixtureId', pick['id']), pick['market']) for pick in picks.values()}
+    minimum=snapshot.get('pickMinimum',.875)
+    qualifying={(pick.get('fixtureId',pick['id']),pick['market']) for pick in picks.values()
+                if pick['prob']>=minimum}
     leagues = {league['code']: league['name'] for league in snapshot['leagues']}
 
     for match in snapshot['matches']:
-        if not match.get('pick') or (match['id'], match['market']) in archived:
+        key=(match['id'],match['market'])
+        if not match.get('pick') or (key in archived and (match['prob']<minimum or key in qualifying)):
             continue
         pick_id = match['id'] if match['id'] not in picks else f"{match['id']}|{match['market']}"
+        if pick_id in picks:
+            pick_id=f"{pick_id}|{snapshot['updated']}"
         picks[pick_id] = {
             key: match[key] for key in ('day', 'home', 'away', 'league', 'market', 'prob')
         }
