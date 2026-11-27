@@ -40,7 +40,7 @@ class PolicyTests(unittest.TestCase):
                  market='1X',prob=.84,publishedAt='2026-11-26T12:00:00+00:00',status='pending',score=None)
         match=dict(id='game',day='2026-11-28',home='Home',away='Away',league='test',
                    market='1X',prob=.88,pick='standard')
-        snapshot=dict(updated='2026-11-27T12:00:00+00:00',pickMinimum=.875,leagues=[],matches=[match])
+        snapshot=dict(updated='2026-11-27T12:00:00+00:00',pickMinimum=.875,leagues=[],matches=[match,dict(id='unpredicted',day='2026-11-28')])
         first=update_history({'picks':[old]},snapshot,{})
         second=update_history(first,snapshot,{})
         self.assertEqual(sorted(p['prob'] for p in second['picks']),[.84,.88])

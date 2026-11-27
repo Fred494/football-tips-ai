@@ -91,8 +91,10 @@ def update_history(history, snapshot, scores):
     leagues = {league['code']: league['name'] for league in snapshot['leagues']}
 
     for match in snapshot['matches']:
+        if not match.get('pick'):
+            continue
         key=(match['id'],match['market'])
-        if not match.get('pick') or (key in archived and (match['prob']<minimum or key in qualifying)):
+        if key in archived and (match['prob']<minimum or key in qualifying):
             continue
         pick_id = match['id'] if match['id'] not in picks else f"{match['id']}|{match['market']}"
         if pick_id in picks:
