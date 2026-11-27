@@ -73,12 +73,12 @@ def market_metrics(p, y):
     for market, column in [('1X', 2), ('X2', 0)]:
         score, hits = 1 - p[:, column], y != column
         bands = []
-        for low, high in zip([0, .60, .70, .80, .85, .90, .95], [.60, .70, .80, .85, .90, .95, 1.01]):
+        for low, high in zip([0, .60, .70, .80, .875, .90, .95], [.60, .70, .80, .875, .90, .95, 1.01]):
             mask = (score >= low) & (score < high)
             if mask.any():
                 bands.append(dict(lo=low, hi=min(high, 1), n=int(mask.sum()),
                                   expected=float(score[mask].mean()), observed=float(hits[mask].mean())))
-        eligible = score >= .85
+        eligible = score >= .875
         error = (score - hits) ** 2
         chance = np.clip(np.where(hits, score, 1 - score), 1e-9, 1)
         result[market] = dict(brier=float(error.mean()), logLoss=float(-np.log(chance).mean()),

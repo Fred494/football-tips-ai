@@ -9,6 +9,7 @@ from model_benchmarks import EloGoals, FORM_WINDOW, ModelBlend, recent_strength,
 from sklearn.linear_model import LogisticRegression
 
 from international_data import CODES, ROOT
+from window import history_start
 from qualification import group_status
 
 FEATURES=['National team Elo advantage','Recent points adjusted for opponent Elo',
@@ -60,6 +61,7 @@ def predict_internationals(today, timezone, threshold, summary, measure, standin
         if key in verified and verified[key]['league']==r['league'] and verified[key]['score'] is None:
             verified[key]['score']=r['score']
     rows.update(verified)
+    rows={key:row for key,row in rows.items() if row['day']>=history_start(today).isoformat()}
     batches=defaultdict(list)
     for r in rows.values():
         if r['day']<=horizon:

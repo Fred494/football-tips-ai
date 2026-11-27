@@ -2,35 +2,38 @@
 from datetime import datetime, timedelta
 
 from history import before_kickoff
+from scoreboard_data import key as club_key
 
-MINIMUM = .85
-EXCEPTION_MINIMUM = .80
+MINIMUM = .875
 
 
 def home_exception(stats, table, home, away):
-    """Require a top-quarter host, bottom-quarter visitor and strong venue gap."""
-    ranks = {row['team']: index for index, row in enumerate(table)}
-    if len(table) < 8 or home not in ranks or away not in ranks:
-        return False
-    home_venue, away_venue = stats[2:4]
-    quarter = len(table) // 4
-    return (ranks[home] < quarter and ranks[away] >= len(table) - quarter
-            and min(home_venue['n'], away_venue['n']) >= 5
-            and home_venue['ppg'] >= 2.25 and away_venue['ppg'] <= 1.0)
+    """Flag every top-five host facing a bottom-five visitor."""
+    ranks = {club_key(row['team']): index for index, row in enumerate(table)}
+    home,away=club_key(home),club_key(away)
+    return (len(table)>=10 and home in ranks and away in ranks
+            and ranks[home]<5 and ranks[away]>=len(table)-5)
 
 
 def assign_picks(snapshot):
     publication = datetime.fromisoformat(snapshot['updated'])
+    leagues={league['code']:league for league in snapshot['leagues']}
     last_day = (publication.date() + timedelta(days=3)).isoformat()
-    exceptions = set()
     for match in sorted(snapshot['matches'], key=lambda m: (-m.get('prob', 0), m['id'])):
         probability = match.get('prob')
         if (match.get('stale') or probability is None or match['day'] > last_day
                 or not before_kickoff(match, publication)):
             continue
-        if probability >= MINIMUM:
-            match['pick'] = 'standard'
-        elif (probability >= EXCEPTION_MINIMUM and match['market'] == '1X'
-              and match['day'] not in exceptions and match.get('homeException')):
+        league=leagues.get(match['league'],{})
+        published=league.get('displayTable',{})
+        groups=published.get('groups',[])
+        table=groups[0]['rows'] if published.get('season')==match.get('season') and len(groups)==1 else match.get('table',[])
+        risk=home_exception(None,table,match['home'],match['away'])
+        if risk and not match.get('international'):
             match['pick'] = 'exception'
-            exceptions.add(match['day'])
+            if match.get('market')!='1X':
+                match['why']=[]
+            match['market'] = '1X'
+            match['prob'] = float(1-match['breakdown'][2])
+        elif probability >= MINIMUM:
+            match['pick'] = 'standard'

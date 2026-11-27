@@ -41,6 +41,8 @@ jobs:
       - run: python international_data.py
       - run: python club_tables.py
       - run: python scoreboard_data.py
+      - run: python ranking_data.py
+      - run: python crest_data.py
       - run: python build.py
       - uses: actions/upload-pages-artifact@v3
         with:

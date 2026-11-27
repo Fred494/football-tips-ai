@@ -8,6 +8,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from window import history_start
 from afcon import SOURCE as CAF_SOURCE, parse_afcon
 
 ROOT = Path(__file__).resolve().parent
@@ -61,7 +62,7 @@ def parse_schedule(page):
     return parsed
 
 def parse_results(payload,today):
-    start=today.replace(year=today.year-3,day=min(today.day,28)).isoformat()
+    start=history_start(today).isoformat()
     end=today.isoformat()
     rows=[]
     for r in csv.DictReader(io.StringIO(payload)):

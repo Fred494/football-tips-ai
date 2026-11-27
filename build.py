@@ -12,13 +12,16 @@ from scipy.special import softmax
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
+from window import history_start
+from ranking_model import run as coefficient_model
+from crest_data import apply_crests
 from results_feed import merge
 from european_data import SOURCES as EUROPEAN_SOURCES, club_key
 from history import load_history, load_published_history, merge_picks, save_history, update_history
 from international_model import predict_internationals
 from model_benchmarks import (EloGoals, FORM_WINDOW, ModelBlend, market_metrics, recent_strength,
                               select_forecast_model)
-from picks import MINIMUM, EXCEPTION_MINIMUM, assign_picks, home_exception
+from picks import MINIMUM, assign_picks, home_exception
 from player_data import PLAYER_FEATURES, for_match, load_players
 
 ROOT = Path(__file__).resolve().parent
@@ -141,6 +144,9 @@ def read_data():
             if len(recent_checks)==4:
                 league['fixturesChecked']=min(recent_checks)
             league['scoreSource']+=' / ESPN scoreboard'
+    for league in leagues:
+        league['seasons']={season:[m for m in rows if m['day']>=history_start(TODAY).isoformat()]
+                           for season,rows in league['seasons'].items()}
     return leagues
 
 def standings(current):
@@ -280,15 +286,18 @@ def process(leagues, players):
 def predict(model, x, temperature):
     return softmax(np.log(np.clip(model.predict_proba(x),1e-9,1))/temperature,axis=1)
 
-def measure(p,y):
+def measure(p,y,risk=None):
     q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
     hits=np.stack((y!=2,y!=0),axis=1)
     best=q.argmax(axis=1)
+    if risk is not None:
+        best=np.where(risk,0,best)
     i=np.arange(len(y))
+    qualified=q[i,best]>=PICK_MINIMUM
     return dict(n=len(y),logLoss=round(log_loss(y,p,labels=[0,1,2]),4),
                 brier=round(float(np.mean((p-np.eye(3)[y])**2)*3),4),
                 doubleBrier=np.round(((q-hits)**2).mean(axis=0),4).tolist(),
-                markets=market_metrics(p,y),hit=np.round(hits.mean(axis=0),4).tolist(),selected=round(float(hits[i,best].mean()),4))
+                markets=market_metrics(p,y),hit=np.round(hits.mean(axis=0),4).tolist(),selectedN=int(qualified.sum()),selected=round(float(hits[i,best][qualified].mean()),4) if qualified.any() else None)
 
 def competition_backtest(records):
     """Pool pre-month training games, then score each league's held-out matches."""
@@ -309,9 +318,10 @@ def competition_backtest(records):
                 temperature=minimize_scalar(lambda t:log_loss(yc,predict(model,xc,t),labels=[0,1,2]),
                                             bounds=(.4,4),method='bounded').x
                 for record,prob in zip(games,predict(model,[r[2] for r in games],temperature)):
-                    predictions[record[1]].append((prob,record[3]))
+                    predictions[record[1]].append((prob,record[3],record[7]))
         past.extend(games)
-    return {code:measure(np.array([p for p,y in rows]),np.array([y for p,y in rows]))
+    return {code:measure(np.array([p for p,y,risk in rows]),np.array([y for p,y,risk in rows]),
+                         np.array([risk for p,y,risk in rows]))
             for code,rows in predictions.items()}
 
 def build():
@@ -319,6 +329,9 @@ def build():
     european_context(leagues)
     final_scores={m['id']:m['score'] for l in leagues for season in l['seasons'].values()
                   for m in season if m['score'] is not None and m['day']<=TODAY.isoformat()}
+    european_games=[m for l in leagues if l['code'] in EUROPEAN_SOURCES
+                    for rows in l['seasons'].values() for m in rows
+                    if m['score'] is not None and m['day']<TODAY.isoformat()]
     records,matches=process(leagues,load_players(ROOT))
     evaluation=None
     if len(records)>=300:
@@ -332,8 +345,8 @@ def build():
         xe,ye=unpack(test)
         candidates=[]
         for name,model,window in [
-                ('Logistic regression · three seasons',LogisticRegression(max_iter=1200),train),
-                ('Gradient boosted trees · three seasons',HistGradientBoostingClassifier(max_iter=85,random_state=42),train),
+                ('Logistic regression · two years',LogisticRegression(max_iter=1200),train),
+                ('Gradient boosted trees · two years',HistGradientBoostingClassifier(max_iter=85,random_state=42),train),
                 ('Elo + Poisson',EloGoals(),train),
                 ('Elo + Dixon–Coles',EloGoals(correction=True),train)]:
             if len(window)<100:
@@ -345,7 +358,7 @@ def build():
             candidates.append((name,model))
         fitted=dict(candidates)
         candidates.append(('Logistic + Elo Poisson blend',ModelBlend(
-            fitted['Logistic regression · three seasons'],fitted['Elo + Poisson'])))
+            fitted['Logistic regression · two years'],fitted['Elo + Poisson'])))
         validation_codes=np.array([r[1] for r in val])
         league_ids=np.array([r[1] for r in test])
         name,model,calibration,incumbent,baselines=select_forecast_model(
@@ -383,39 +396,35 @@ def build():
             ablations.append(dict(name=label, **measure(predict(baseline,arrays[2],t),ye)))
         p=calibration.predict(model.predict_proba(xe),league_ids)
         q=np.stack((1-p[:,2],1-p[:,0]),axis=1)
-        best=q.argmax(axis=1)
-        scores=q.max(axis=1)
+        exceptions=np.array([r[7] for r in test],dtype=bool)
+        best=np.where(exceptions,0,q.argmax(axis=1))
+        scores=q[np.arange(len(ye)),best]
         hit=np.where(best==0,ye!=2,ye!=0)
         bands=[]
-        for lo,hi in zip([.85,.9,.95],[.9,.95,1.01]):
+        for lo,hi in zip([.875,.9,.95],[.9,.95,1.01]):
             mask=(scores>=lo)&(scores<hi)
             if mask.any():
                 bands.append(dict(lo=lo,hi=min(hi,1),n=int(mask.sum()),expected=float(scores[mask].mean()),observed=float(hit[mask].mean())))
-        qualifying=scores>=PICK_MINIMUM
-        exceptions=np.zeros(len(test),dtype=bool)
-        exception_days=set()
-        for index in np.argsort(-scores,kind='stable'):
-            day=test[index][0]
-            if (best[index]==0 and EXCEPTION_MINIMUM<=scores[index]<PICK_MINIMUM
-                    and test[index][7] and day not in exception_days):
-                exceptions[index]=True
-                exception_days.add(day)
+        qualifying=(scores>=PICK_MINIMUM)&~exceptions
+        risk_scores=q[:,0]
+        risk_hits=ye!=2
         match_days={r[0] for r in test}
         shown_days={r[0] for r,shown in zip(test,qualifying) if shown}
         displayed=dict(n=int(qualifying.sum()),hit=float(hit[qualifying].mean()) if qualifying.any() else None,
                        days=len(shown_days),matchDays=len(match_days),
                        exceptions=int(exceptions.sum()),
-                       exceptionHit=float(hit[exceptions].mean()) if exceptions.any() else None)
-        holdout_leagues={code:measure(p[league_ids==code],ye[league_ids==code])
+                       exceptionHit=float(risk_hits[exceptions].mean()) if exceptions.any() else None,
+                       exceptionMean=float(risk_scores[exceptions].mean()) if exceptions.any() else None)
+        holdout_leagues={code:measure(p[league_ids==code],ye[league_ids==code],exceptions[league_ids==code])
                          for code in sorted(set(league_ids))}
         by_league=competition_backtest(records)
         evaluation=dict(name=name,train=len(chosen_train),trainingStart=chosen_train[0][0],historyStart=records[0][0],historyMatches=len(records),validation=len(val),start=test[0][0],end=test[-1][0],
-                        **measure(p,ye),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,holdoutLeagues=holdout_leagues,ablations=ablations,
+                        **measure(p,ye,exceptions),bands=bands,displayed=displayed,playerModel=player_evaluation,leagues=by_league,holdoutLeagues=holdout_leagues,ablations=ablations,
                         calibration=calibration.method,calibratedLeagues=sorted(calibration.offsets),
                         incumbent=dict(name=incumbent_name,**measure(incumbent_calibration.predict(
                             incumbent_model.predict_proba(xe),league_ids),ye)),
                         models=[dict(name=n,train=len(train),trainStart=train[0][0],
-                                     **measure(c.predict(m.predict_proba(xe),league_ids),ye))
+                                     **measure(c.predict(m.predict_proba(xe),league_ids),ye,exceptions))
                                 for n,(_,m,c) in baselines.items()])
         median=np.median(unpack(chosen_train)[0],axis=0)
         eligible=[m for m in matches if m['ready']]
@@ -443,6 +452,7 @@ def build():
                 m['breakdown']=probs.tolist()
                 m['why']=sorted([dict(name=k,value=float(x[i]),delta=float(alt[i,excluded]-probs[excluded]))
                                   for i,k in enumerate(feature_names)],key=lambda e:abs(e['delta']),reverse=True)[:3]
+    coefficient_evaluation=coefficient_model(european_games,matches,TODAY,measure,standings)
     timestamp=datetime.now(ZoneInfo('Europe/Lisbon')).isoformat(timespec='seconds')
     for m in matches:
         m.pop('x')
@@ -451,7 +461,7 @@ def build():
         TODAY,LISBON,PICK_MINIMUM,summary,measure,standings)
     leagues.extend(national_leagues)
     matches.extend(national_matches)
-    snapshot=dict(internationalEvaluation=national_evaluation,updated=timestamp,day=TODAY.isoformat(),source=BASE,pickMinimum=PICK_MINIMUM,leagues=leagues,matches=matches,evaluation=evaluation)
+    snapshot=dict(coefficientEvaluation=coefficient_evaluation,historyStart=history_start(TODAY).isoformat(),riskRule='Top-five host versus bottom-five visitor',internationalEvaluation=national_evaluation,updated=timestamp,day=TODAY.isoformat(),source=BASE,pickMinimum=PICK_MINIMUM,leagues=leagues,matches=matches,evaluation=evaluation)
     club_tables=ROOT/'data'/'club-tables.json'
     if club_tables.exists():
         display_tables=json.loads(club_tables.read_text())
@@ -466,6 +476,7 @@ def build():
         snapshot['crests'].update(json.loads(extra_crests.read_text()))
     final_scores.update(national_scores)
 
+    apply_crests(snapshot)
     assign_picks(snapshot)
     history_path = ROOT/'dist'/'history.json'
     with sqlite3.connect(ROOT/'data'/'forecasts.sqlite') as db:

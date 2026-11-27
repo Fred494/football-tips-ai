@@ -24,13 +24,17 @@ function card(m){
   const [h,a,hv,av,hr,ar]=m.stats;
   const rank=t=>{const n=m.table.findIndex(r=>r.team===t);return n>=0?'#'+(n+1):'—';};
   const comparison=[[m.international?'Group points/game':'Season points/game',h.ppg,a.ppg],['Goals/game',h.gpg,a.gpg],['Goals conceded/game',h.gapg,a.gapg],['Home vs away points/game',hv.ppg,av.ppg],['Home vs away win rate',hv.n?pct(hv.w/hv.n):null,av.n?pct(av.w/av.n):null],['Home vs away draw rate',hv.n?pct(hv.d/hv.n):null,av.n?pct(av.d/av.n):null],['Venue sample',hv.n,av.n],['Last ten points',hr.pts,ar.pts]];
-  const explanation=(ranked(m)?m.why:null)?.map(v=>'<p class="reason"><strong>'+esc(v.name)+'</strong> · '+v.value.toFixed(2)+'. '+(v.delta>=0?'+':'')+(v.delta*100).toFixed(1)+' percentage points versus the training median.</p>').join('')||(m.stale?'<p>The league feed has no verified result from the last 21 days. The estimate is excluded from the default ranking.</p>':'<p>Forecast withheld when either team lacks sufficient prior results or three current-season games, or when no model is available.</p>');
+  const explanation=(m.pick==='exception'?'<p>ARRISCADO · Top-five home team against a bottom-five visitor. The estimate shown is for 1X. This selection can be below the normal 87.5% threshold.</p>':'')+((ranked(m)?m.why:null)?.map(v=>'<p class="reason"><strong>'+esc(v.name)+'</strong> · '+v.value.toFixed(2)+'. '+(v.delta>=0?'+':'')+(v.delta*100).toFixed(1)+' percentage points versus the training median.</p>').join('')||(m.pick==='exception'?'':m.stale?'<p>The league feed has no verified result from the last 21 days. The estimate is excluded from the default ranking.</p>':'<p>Forecast withheld when either team lacks sufficient prior results or three current-season games, or when no model is available.</p>'));
   return '<details class="fixture'+(m.pick==='exception'?' fixture-exception':'')+'"><summary><div class="meta">'+esc(getLeague(m.league).name)+'<small>'+esc(m.kickoff?m.kickoff+' Lisbon time':'Kickoff time unavailable')+'</small></div>'+
     '<div class="teams"><span>'+crest(m.home,m.international)+'<strong>'+esc(m.home)+'</strong><small>'+rank(m.home)+'</small></span><span>'+crest(m.away,m.international)+'<strong>'+esc(m.away)+'</strong><small>'+rank(m.away)+'</small></span></div>'+
-    '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+(m.pick==='exception'?'<small class="exception-label">Home-form exception</small>':'')+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
+    '<div class="score"><span class="market">'+esc(m.market)+'</span> '+pct(m.prob)+(m.pick==='exception'?'<small class="exception-label">ARRISCADO</small>':'')+'<small>Match analysis <span aria-hidden="true">⌄</span></small></div></summary><div class="inside grid">'+
     '<section class="box full"><h3>Why this prediction?</h3>'+explanation+(m.why?'<small>Each factor is varied individually. Effects may overlap and are approximate.</small>':'')+'</section>'+
     (m.source?.startsWith('https://www.uefa.com/')?'<section class="box full"><a href="'+esc(m.source)+'">Official UEFA match page</a></section>':'')+playerBox(m)+
     qualificationBox(m)+
+    (m.rankingFallback?'<section class="box full"><h3>UEFA coefficient forecast</h3><p>The full team history was insufficient. This estimate uses the separately tested coefficient model.</p>'+
+      table(['Team','UEFA rank','Coefficient'],[row([m.home,m.rankingFallback.home.rank,m.rankingFallback.home.points]),
+        row([m.away,m.rankingFallback.away.rank,m.rankingFallback.away.points])].join(''))+
+      '<p>Ranking season '+esc(m.rankingFallback.season)+' · Available since '+esc(m.rankingFallback.available)+'</p></section>':'')+
     leaguePerformanceBox(m)+
     formBox(m.form[0],m.home,hr,m.long[0],m.international,m.formScope)+formBox(m.form[1],m.away,ar,m.long[1],m.international,m.formScope)+
     '<section class="box"><h3>Team performance</h3>'+table(['Metric',m.home,m.away],comparison.map(x=>row(x)).join(''))+'</section>'+
@@ -52,7 +56,7 @@ function playerBox(m){
 }
 function hero(k,h,p){return '<section class="hero"><div class="kicker">'+esc(k)+'</div><h1>'+esc(h)+'</h1><p>'+esc(p)+'</p></section>';}
 function tile(label,value){return '<div class="tile"><strong>'+esc(value)+'</strong><small>'+esc(label)+'</small></div>';}
-const minimumPick = () => data.pickMinimum ?? .85;
+const minimumPick = () => data.pickMinimum ?? .875;
 function beforeStart(m,today){
   if(m.day!==today) return m.day>today;
   if(!m.kickoff) return false;
@@ -87,14 +91,6 @@ function crest(team,international=false,logo=null){
  const flag=international?nationCodes[team]:null;
  return logoBadge(team,flag?'https://flagcdn.com/w80/'+flag+'.png':(logo||data.crests?.[team]),flag?'flag-badge':'');
 }
-function otherFixtures(fixtures){
-  if(!fixtures.length) return '';
-  return '<details class="box"><summary>Outros jogos do dia ('+fixtures.length+')</summary>'+
-    table(['Hora de Lisboa','Competição','Jogo','Motivo'],fixtures.map(m=>row([
-      m.kickoff,getLeague(m.league).name,m.home+' – '+m.away,
-      m.stale?'Dados por confirmar':typeof m.prob!=='number'?'Sem previsão':'Fora das Top Picks'
-    ])).join(''))+'</details>';
-}
 function refreshMatches(){
   const today=dayNow();
   const start=today;
@@ -107,7 +103,7 @@ function refreshMatches(){
     if(!fixtures.length) message=day===today?'No fixtures are listed today in the available feeds.':'No fixtures are listed for this date in the available feeds.';
     else if(!fixtures.some(m=>ranked(m))) message='There are fixtures for this date, but the available data is insufficient to rank them.';
     return '<section class="day"><div class="day-title"><div><h2>'+(day===today?'Today':pretty(day))+'</h2>'+(day===today?'<span>'+pretty(day)+'</span>':'')+'</div><span class="count">'+picks.length+' '+(picks.length===1?'pick':'picks')+'</span></div>'+
-      (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+otherFixtures(fixtures.filter(m=>!picks.includes(m)))+'</section>';
+      (picks.length?picks.map(card).join(''):'<div class="empty"><strong>'+esc(message)+'</strong><span>'+(day===today?'Select another date above to check its picks.':'Check another date or change your selected leagues.')+'</span></div>')+'</section>';
   }).join('')||'<p class="empty">Select a date above to see its picks.</p>';
   bindImageFallback(document.querySelector('#results'));
 }
@@ -123,7 +119,7 @@ function predictions(){
     '<div class="date-grid" aria-label="Match dates">'+dates.map(day=>{
       const active=dateSelected(day,start);
       return '<button class="date-chip '+(active?'active':'')+'" data-day="'+day+'" aria-pressed="'+active+'"><span>'+esc(day===today?'Today':dateLabel(day,{weekday:'short'}))+'</span><strong>'+esc(dateLabel(day,{day:'numeric',month:'short'}))+'</strong></button>';
-    }).join('')+'</div><p class="criteria">Picks at '+Math.round(minimumPick()*100)+'% or higher, ranked by calibrated probability within each day. Yellow marks rare home-form exceptions.</p><div id="results"></div>'+cafResults();
+    }).join('')+'</div><p class="criteria">Picks at '+(minimumPick()*100).toFixed(1)+'% or higher, ranked by calibrated probability within each day. ARRISCADO marks every top-five home team facing a bottom-five opponent.</p><div id="results"></div>';
   document.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{
     const day=b.dataset.day;
     const selection=day===start?hiddenStartDays:visibleDays;
@@ -296,7 +292,7 @@ function qualificationBox(m){
 }
 function leaguePerformanceBox(m){
  const l=getLeague(m.league), e=leagueHit(l.code);
- return '<section class="box full"><h3>Performance by league</h3><div class="table-scroll"><table><thead><tr><th>League</th><th>Matches</th><th>Selected hit rate</th></tr></thead><tbody><tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr></tbody></table></div><p>Historical backtest results. Club competitions use monthly test windows. This is separate from the probability for this match.</p></section>';
+ return '<section class="box full"><h3>Performance by league</h3><div class="table-scroll"><table><thead><tr><th>League</th><th>Picks ≥87.5%</th><th>Hit rate ≥87.5%</th></tr></thead><tbody><tr><td>'+esc(l.name)+'</td><td>'+esc(e?.selectedN??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr></tbody></table></div><p>Historical backtest results. Club competitions use monthly test windows. This is separate from the probability for this match.</p></section>';
 }
 function standingsTable(rows,limit,international){
  return table(['#','Team','P','W','D','L','DIFF','GLS','Last 5','PTS'],rows.slice(0,limit).map((r,i)=>
@@ -331,14 +327,9 @@ function leagueCard(l){
    '<p>'+esc(l.latest?'Latest verified result '+l.latest:'Latest result unavailable')+(l.scoreSource?' · '+esc(l.scoreSource):'')+'</p>'+
    (leagueLinks[l.code]?'<a href="'+leagueLinks[l.code]+'">Official UEFA fixtures and results</a>':'')+'</div></details></article>';
 }
-function cafResults(){
- const games=getLeague('int.afconq')?.recentResults||[];
- return games.length?'<section class="box full"><h3>AFCON qualifying results</h3>'+
-   table(['Date','Home','Score','Away'],games.map(m=>'<tr><td>'+esc(m.day)+'</td><td><span class="team-cell">'+crest(m.home,true)+esc(m.home)+'</span></td><td>'+esc(m.score.join('–'))+'</td><td><span class="team-cell">'+crest(m.away,true)+esc(m.away)+'</span></td></tr>').join(''))+'</section>':'';
-}
 function leagues(){
  main.innerHTML=hero('Competition coverage','Your leagues','Compare standings, recent form and historical model performance.')+
-   '<div class="coverage">'+[...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(leagueCard).join('')+'</div>'+cafResults();
+   '<div class="coverage">'+[...data.leagues].sort((a,b)=>Number(b.priority)-Number(a.priority)).map(leagueCard).join('')+'</div>';
  main.querySelectorAll('[data-code]').forEach(el=>el.onchange=()=>{if(el.checked)disabled.delete(el.dataset.code);else disabled.add(el.dataset.code);localStorage.setItem('edge-disabled',JSON.stringify([...disabled]));});
  bindImageFallback(main);
 }
@@ -347,10 +338,10 @@ function competitionPerformance(national){
    .sort((a,b)=>(leagueHit(b.code)?.selected??-1)-(leagueHit(a.code)?.selected??-1)||a.name.localeCompare(b.name));
  const rows=competitions.map(l=>{
    const e=leagueHit(l.code);
-   return '<tr><td>'+esc(l.name)+'</td><td>'+esc(e?.n??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr>';
+   return '<tr><td>'+esc(l.name)+'</td><td>'+esc(e?.selectedN??'—')+'</td><td>'+rateLabel(e?.selected)+'</td></tr>';
  }).join('');
  return '<section class="box full"><h3>'+ (national?'National competitions':'Club competitions')+'</h3>'+
-   table(['Competition','Test matches','Historical hit rate'],rows)+
+   table(['Competition','Picks ≥87.5%','Hit rate ≥87.5%'],rows)+
    '<p>'+(national?'A rate appears where verified regulation-time scores were available for testing.':'Ranked by historical hit rate in monthly tests using only earlier matches. Small samples can produce unusually high or low rates.')+'</p></section>';
 }
 function marketCalibration(clubs,nations){
@@ -358,11 +349,11 @@ function marketCalibration(clubs,nations){
    ...data.leagues.map(l=>[l.name,(l.international?nations:clubs)?.holdoutLeagues?.[l.code]])];
  const rows=sets.flatMap(([name,e])=>Object.entries(e?.markets??{}).map(([market,m])=>
    row([name,market,e.n,m.brier.toFixed(4),m.logLoss.toFixed(4),m.above,
-        pct(m.hitAbove),m.bands.filter(b=>b.lo>=.85).map(b=>
-          Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%: '+pct(b.expected)+' / '+pct(b.observed)+' (n='+b.n+')'
+        pct(m.hitAbove),m.bands.filter(b=>b.lo>=.875).map(b=>
+          (b.lo*100).toFixed(1)+'–'+(b.hi*100).toFixed(1)+'%: '+pct(b.expected)+' / '+pct(b.observed)+' (n='+b.n+')'
         ).join(' · ')||'—'])));
  return '<details class="box full"><summary>Calibration by league and market</summary>'+
-   table(['Competition','Market','Test matches','Brier','Log loss','≥85%','Hit rate ≥85%','85%+ bands · predicted / observed'],rows.join(''))+
+   table(['Competition','Market','Test matches','Brier','Log loss','≥87.5%','Hit rate ≥87.5%','87.5%+ bands · predicted / observed'],rows.join(''))+
    '<p>Test-period breakdown. Competition adjustments are used only when selected in validation and supported by enough prior results.</p></details>';
 }
 function qualificationTest(intl){
@@ -382,18 +373,29 @@ function activeCalibration(e){
    (e.incumbent?'<p>Previous selection rule on the same test: '+esc(e.incumbent.name)+
      ' · Log loss '+esc(e.incumbent.logLoss)+' · Brier '+esc(e.incumbent.brier)+'</p>':'');
 }
+function coefficientPerformance(){
+ const e=data.coefficientEvaluation;
+ if(!e) return '';
+ if(!e.available) return '<section class="box full"><h3>UEFA ranking experiment</h3><p>'+esc(e.reason)+'</p></section>';
+ return '<section class="box full"><h3>UEFA ranking experiment</h3><p>'+esc(e.name)+
+   ' · '+(e.enabled?'Available for fixtures without a full team model':'Evaluation only')+
+   ' · '+e.forecastsAdded+' forecasts added</p>'+
+   table(['Test matches','Log loss','Brier','Picks ≥87.5%','Hit rate ≥87.5%'],
+     row([e.n,e.logLoss,e.brier,e.selectedN,pct(e.selected)]))+
+   '<p>Test dates '+esc(e.start)+' to '+esc(e.end)+'. Official season-end coefficients are used only after their recorded availability date. UEFA coefficients summarize five seasons. Match history is restricted to two years.</p></section>';
+}
 function performance(){
   const e=data.evaluation;
   const intl=data.internationalEvaluation;
   main.innerHTML=hero('Out-of-sample evaluation','Model performance','Historical forecasts tested on matches dated after training and calibration.')+
     (!e?'<p class="notice">Insufficient verified results to evaluate a model.</p>':
       '<p>'+esc(e.name)+' · Test window '+esc(e.start)+' to '+esc(e.end)+' · '+e.train+' training matches since '+esc(e.trainingStart)+' · '+e.validation+' calibration matches</p>'+
-      '<div class="stats">'+tile('Test matches',e.n)+tile('Selected outcome hit rate',pct(e.selected))+tile('1X hit rate',pct(e.hit[0]))+tile('X2 hit rate',pct(e.hit[1]))+tile('Multiclass log loss',e.logLoss)+tile('Multiclass Brier',e.brier)+'</div>'+
-      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.filter(b=>b.lo>=.85).map(b=>row([Math.round(b.lo*100)+'–'+Math.round(b.hi*100)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
-      '<section class="box"><h3>Historical '+Math.round(minimumPick()*100)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>'+e.displayed.exceptions+' yellow exceptions · '+pct(e.displayed.exceptionHit)+' observed hit rate.</p><p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
+      '<div class="stats">'+tile('Test matches',e.n)+tile('Picks ≥87.5%',e.selectedN)+tile('Hit rate ≥87.5%',pct(e.selected))+tile('Multiclass log loss',e.logLoss)+tile('Multiclass Brier',e.brier)+'</div>'+
+      '<div class="grid"><section class="box full"><h3>Calibration by probability band</h3>'+table(['Band','Matches','Mean forecast','Observed success'],e.bands.filter(b=>b.lo>=.875).map(b=>row([(b.lo*100).toFixed(1)+'–'+(b.hi*100).toFixed(1)+'%',b.n,pct(b.expected),pct(b.observed)])).join(''))+'</section>'+
+      '<section class="box"><h3>Historical '+(minimumPick()*100).toFixed(1)+'% filter</h3>'+table(['Qualifying matches','Hit rate','Matchdays with picks'],row([e.displayed.n,pct(e.displayed.hit),e.displayed.days+' / '+e.displayed.matchDays]))+'<p>'+e.displayed.exceptions+' ARRISCADO picks · '+pct(e.displayed.exceptionHit)+' observed hit rate.</p><p>Tests the probability rule on completed fixtures. Historical feed availability could not be replayed.</p></section>'+
       '<section class="box"><h3>Model comparison</h3>'+table(['Model','Training matches','Log loss','Brier'],e.models.map(m=>row([m.name,m.train,m.logLoss,m.brier])).join(''))+'</section>'+
       (e.ablations?'<section class="box full"><h3>Form and venue tests</h3>'+table(['Features','Log loss','Brier'],e.ablations.map(m=>row([m.name,m.logLoss,m.brier])).join(''))+'</section>':'')+
-      competitionPerformance(false)+competitionPerformance(true)+marketCalibration(e,intl)+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p>'+activeCalibration(intl)+table(['Model','Log loss','Brier'],(intl.models||[]).map(m=>row([m.name,m.logLoss,m.brier])).join(''))+qualificationTest(intl)+'</section>':''));
+      competitionPerformance(false)+competitionPerformance(true)+marketCalibration(e,intl)+coefficientPerformance()+'</div>'+(intl?'<section class="box"><h3>National team model</h3><p>'+intl.n+' held-out international matches · '+intl.above+' above the threshold · '+pct(intl.hitAbove)+' hit rate</p>'+activeCalibration(intl)+table(['Model','Log loss','Brier'],(intl.models||[]).map(m=>row([m.name,m.logLoss,m.brier])).join(''))+qualificationTest(intl)+'</section>':''));
 }
 const historyStatus = { hit: 'Acertou', miss: 'Errou', pending: 'Por confirmar' };
 const recentFirst = (a, b) => b.day.localeCompare(a.day) || a.home.localeCompare(b.home, 'pt');
@@ -410,7 +412,7 @@ const historyOptions = entries => entries.map(([value, label]) =>
 
 function renderHistory(content, history) {
   const today = dayNow();
-  const archived = history.picks.filter(pick => Object.hasOwn(historyStatus, pick.status) &&
+  const archived = history.picks.filter(pick => pick.prob >= .875 && Object.hasOwn(historyStatus, pick.status) &&
     (pick.day < today || (pick.day === today &&
       (pick.status !== 'pending' || (pick.kickoff && !beforeStart(pick,today))))));
   const leagues = [...new Map(archived.map(pick => [pick.league, pick.leagueName]))]
@@ -454,8 +456,10 @@ function renderHistory(content, history) {
     const matches = picks.length ? table(['Data', 'Jogo', 'Liga', 'Palpite', 'Probabilidade', 'Resultado', 'Estado'],
       picks.map(pick => {
         const values = [new Intl.DateTimeFormat('pt-PT', { dateStyle: 'short', timeZone: 'UTC' }).format(new Date(pick.day + 'T12:00Z')),
-          pick.home + ' – ' + pick.away, pick.leagueName, pick.market + (pick.exception ? ' · Exceção' : ''), pct(pick.prob), pick.score?.join('–') ?? '—'];
-        return '<tr>' + values.map(value => '<td>' + esc(value) + '</td>').join('') +
+          pick.home + ' – ' + pick.away, pick.leagueName, pick.market + (pick.exception ? ' · ARRISCADO' : ''), pct(pick.prob), pick.score?.join('–') ?? '—'];
+        return '<tr>' + values.map((value,index) => '<td>' + (index===1?
+          '<span class="team-cell">'+crest(pick.home,pick.league.startsWith('int.'))+esc(pick.home)+' – '+
+          crest(pick.away,pick.league.startsWith('int.'))+esc(pick.away)+'</span>':esc(value)) + '</td>').join('') +
           '<td><span class="history-status history-' + pick.status + '">' + historyStatus[pick.status] + '</span></td></tr>';
       }).join('')) : '<p class="empty">' + (archived.length
         ? 'Nenhum palpite corresponde aos filtros.'
@@ -473,7 +477,7 @@ function renderHistory(content, history) {
 
 let historyRequest;
 async function historyPage() {
-  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados nas Top Picks, incluindo exceções, avaliados pelo resultado aos 90 minutos.');
+  main.innerHTML = hero('Resultados das Top Picks', 'Histórico', 'Palpites publicados com probabilidade original de 87,5% ou mais, avaliados pelo resultado aos 90 minutos.');
   const content = document.createElement('div');
   content.textContent = 'A carregar o histórico…';
   main.append(content);

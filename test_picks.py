@@ -14,9 +14,11 @@ class PublicationTest(TestCase):
         matches = [
             dict(id=str(i), day=(day + timedelta(days=offset)).isoformat(),
                  home='Home', away='Away', league='league', kickoff=kickoff,
-                 market=market, prob=prob, stale=stale, homeException=True)
+                 market=market, prob=prob, stale=stale, homeException=True,
+                 breakdown=[prob-.2,.2,1-prob],table=([dict(team='Home')]+
+                    [dict(team='Other '+str(n)) for n in range(8)]+[dict(team='Away')]) if i==1 else [])
             for i, (prob, market, offset, kickoff, stale) in enumerate([
-                (.85, '1X', 0, '14:00', False),
+                (.875, '1X', 0, '14:00', False),
                 (.83, '1X', 0, '14:00', False),
                 (.81, '1X', 0, '14:00', False),
                 (.84, 'X2', 0, '14:00', False),
@@ -36,20 +38,19 @@ class PublicationTest(TestCase):
         self.assertEqual((rows['0']['status'], rows['1']['status']), ('hit','miss'))
         self.assertTrue(rows['1']['exception'])
         matches[0]['prob'] = .97
-        self.assertEqual(update_history(history, snapshot, {})['picks'][1]['prob'], .85)
+        self.assertEqual(update_history(history, snapshot, {})['picks'][1]['prob'], .875)
         matches[0]['market'] = 'X2'
         alternate = update_history(history, snapshot, {'0': [2, 0]})
         self.assertEqual(next(pick['status'] for pick in alternate['picks'] if pick['id']=='0|X2'), 'miss')
         recovered = merge_picks(history['picks'], [dict(rows['0'],status='pending')])
         self.assertEqual({m['id']:m['status'] for m in recovered}, {'0':'hit','1':'miss'})
 
-    def test_home_exception_checks_table_and_venue_samples(self):
-        table = [dict(team=str(i)) for i in range(8)]
-        stats = [None, None, dict(n=5,ppg=2.25), dict(n=5,ppg=1)]
-        self.assertTrue(home_exception(stats,table,'0','7'))
-        self.assertFalse(home_exception(stats,table,'7','0'))
-        stats[2]['n'] = 4
-        self.assertFalse(home_exception(stats,table,'0','7'))
+    def test_home_exception_checks_top_and_bottom_five(self):
+        table = [dict(team=str(i)) for i in range(20)]
+        self.assertTrue(home_exception(None,table,'4','15'))
+        self.assertFalse(home_exception(None,table,'5','15'))
+        self.assertFalse(home_exception(None,table,'4','14'))
+        self.assertFalse(home_exception(None,table,'15','4'))
 
 
 class QualificationTest(TestCase):
